@@ -1,188 +1,100 @@
-# FreeWeight  
-## Stress Less. Lift More.
+# FreeWeight — V2 Landing Page Copy
 
-**Strength training shouldn’t live in five different apps.**
-
-If you're a coach, you’re juggling Google Sheets, percentage calculators, and Slack threads just to get a week of programming out.
-
-If you're an athlete, you're logging lifts in one place, texting your coach in another, and hoping your percentages are right.
-
-**FreeWeight is one place to program, track, and share.**  
-Built for the barbell.
-
-**Get off the bench and under the bar.**
-
-[Join the Waitlist]
+**Changes from V1:** Added "Who It's For" with solo/crew/coach tiers + beginner entry point. Changed CTA to "Start Training Free." Softened "Built for the barbell" → "Purpose-built for strength training." Led with athlete experience. Removed jargon from hero. Added product preview callout. See `copy_v1_changes.md` for full rationale.
 
 ---
 
-## The Problem
+## Hero
 
-Strength training is fragmented.
+**Headline:** Stress Less. Lift More.
 
-- Programs in spreadsheets  
-- Percentages calculated manually  
-- Updates buried in group chats  
-- PRs lost in Notes  
-- Progress scattered across apps  
+**Subheadline:** Program your training, track your progress, and train with your team — all in one place. Free forever.
 
-It works — until it doesn’t.
-
-When you’re coaching 15 athletes.  
-When maxes change mid-cycle.  
-When someone misses a lift and the math shifts.  
-When no one can see the team getting stronger.
-
-You shouldn’t need a spreadsheet to lift weights.
+**CTA Button:** Start Training Free →
 
 ---
 
-## The Reframe
+## Pain Point
 
-Endurance athletes have Strava.  
-Cyclists have TrainingPeaks.  
+### Your training is scattered. It doesn't have to be.
 
-Strength athletes have… Google Sheets.
+A spreadsheet for your program. A calculator for percentages. A group chat for check-ins. The Notes app for your maxes. A photo of the whiteboard for today's session.
 
-FreeWeight gives strength training the platform it deserves.
+Sound familiar? FreeWeight replaces the patchwork with a single platform — purpose-built for strength training.
 
-Your numbers.  
-Your team.  
-Your platform.
+---
+
+## Who It's For
+
+### Whether you train alone or coach a team of 60.
+
+**You train solo** — and you want a better system than screenshots and spreadsheets. FreeWeight tracks your maxes, calculates your percentages, and shows your progress over time.
+
+**You train with a crew** — a few friends running a cycle together, a college club team, or a gym community. FreeWeight gives you a shared feed, PRs on the board, and everyone on the same page.
+
+**You coach athletes** — from a handful to a full roster. Write individualized programs under one umbrella plan, push updates instantly, and see who's training and who's not.
+
+**You're just getting started** — new to the barbell or coming from another sport. Pick a built-in program, follow the plan, and let FreeWeight handle the math. Everyone starts somewhere.
 
 ---
 
 ## How It Works
 
-### 1. Coaches Program Once
+### One place to program, track, and share.
 
-Build a team plan.  
-Set percentages.  
-Assign individualized maxes.
+**Program it.** Build training blocks, set percentages off real maxes, and customize by athlete — or pick from built-in templates like 5/3/1, GZCLP, and Starting Strength. No more spreadsheet formulas.
 
-FreeWeight auto-calculates everything.
+**Track it.** Log your lifts in seconds. See your maxes, your history, your trajectory. Progress should feel good before it looks good.
 
-No duplicate spreadsheets.  
-No recalculating when maxes change.  
-No extra buttons.
+**Share it.** A team feed for PRs, milestones, and daily sessions. Not clout — just the work.
 
-As few buttons as possible.
+[**See How It Works → (Product Preview)**]
 
 ---
 
-### 2. Athletes Lift
+## Why FreeWeight?
 
-Open the app.  
-See today’s session.  
-Weights are already calculated.
+**vs. Google Sheets / Notes app**
+Sheets work until you're managing percentages across a 12-week cycle — or sharing updates with 20 athletes. FreeWeight does what sheets do, minus the friction, plus the community.
 
-Log sets.  
-Track PRs.  
-Watch your numbers move up.
+**vs. Strong / Hevy / Strava**
+Those are logging apps. They record what you did. FreeWeight programs what you should do next, auto-calculates your working weights, and connects you to your coach or training partners.
 
-Simple on the surface.  
-Serious underneath.
+**vs. Volt / TeamBuildr / TrueCoach**
+Enterprise coaching platforms start at $200+/year. FreeWeight is free and built for everyone — from a college club team to a group of friends running a training cycle.
 
 ---
 
-### 3. Teams Share the Work
+## Social Proof
 
-See teammates hit PRs.  
-Celebrate progress.  
-Build culture around effort.
+### Built by people who train.
 
-It feels like a social app — but with an edge.
+We're competitive lifters, college athletes, and strength coaches who got tired of stitching tools together. FreeWeight is the platform we wished existed — so we built it.
 
-No influencers.  
-No vanity metrics.  
-Just work.
+**What early users told us:**
 
----
+> "As few buttons to push as possible." — Club team coach
 
-## Built for the Barbell
+> "I want to see progress go up." — College athlete
 
-FreeWeight is not:
-
-- An all-in-one fitness tracker  
-- A logging-only app  
-- A $1,400 enterprise system  
-
-It’s purpose-built for strength training.
-
-It replaces:
-- Sheets  
-- Calculators  
-- Slack threads  
-
-With one clean platform.
+> "Fun and easy to use, but with an edge." — Beta tester
 
 ---
 
-## Why Not Just Use Google Sheets?
+## CTA
 
-Sheets are fine when:
+### Your numbers. Your team. Your platform.
 
-- You coach 3 athletes  
-- Percentages never change  
-- No one misses lifts  
-- No one wants visibility  
+FreeWeight is free. No trials, no tiers, no catch.
 
-But when your team grows, friction compounds.
+Whether you're chasing a PR or just getting started — there's a place for you here.
 
-FreeWeight does what Sheets do — minus the friction, plus the community.
+**[Start Training Free →]**
 
 ---
 
-## Why Not Volt or TeamBuildr?
+## Footer
 
-Those are built for professional programs with professional budgets.
+Purpose-built for strength training. Raising the bar.
 
-FreeWeight is open by default.
-
-Free to start.  
-Lightweight.  
-Designed for college teams, clubs, and serious lifters.
-
----
-
-## Why Not Strava / Strong / Hevy?
-
-They log what you did.
-
-FreeWeight programs what you should do.
-
-And connects it to your coach and your team.
-
----
-
-## What You’ll Feel
-
-- Clarity before a session  
-- Ownership of your numbers  
-- Visible progress  
-- Momentum from your team  
-
-Strength training should feel connected.  
-It should feel alive.
-
-You should see progress go up.
-
----
-
-## Raising the Bar
-
-FreeWeight exists to give strength athletes what endurance athletes have had for years:
-
-A unified, dedicated platform.
-
-So coaches can coach.  
-Athletes can train.  
-And teams can grow together.
-
----
-
-## Get Off the Bench and Under the Bar.
-
-Stress Less. Lift More.
-
-[Join the Waitlist]
+© 2026 FreeWeight
