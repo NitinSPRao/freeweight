@@ -7,6 +7,10 @@
   box-sizing: border-box;
 }
 
+html {
+  scroll-behavior: smooth;
+}
+
 /* ============================================
    CSS VARIABLES - COLOR PALETTE
    ============================================ */
@@ -107,10 +111,18 @@ small {
   border-radius: 10px;
   padding: 1.5rem;
   margin-bottom: 1.5rem;
+  transition: all 0.3s ease;
 }
 
 .card:last-child {
   margin-bottom: 0;
+}
+
+.card:hover {
+  background-color: rgba(230, 237, 243, 0.08);
+  border-color: rgba(180, 240, 0, 0.3);
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
 }
 
 /* Buttons */
@@ -352,22 +364,64 @@ small {
   color: rgba(230, 237, 243, 0.6);
 }
 
-/* Product Preview Link */
-.product-preview {
-  margin-top: 2.5rem;
+/* Product Showcase */
+.product-showcase {
+  margin-top: 3rem;
   text-align: center;
 }
 
-.preview-link {
-  color: var(--color-primary);
-  text-decoration: none;
-  font-weight: 500;
-  transition: color 0.2s ease;
+.product-image {
+  width: 100%;
+  max-width: 900px;
+  height: auto;
+  border-radius: 12px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  border: 1px solid rgba(180, 240, 0, 0.2);
+  transition: all 0.4s ease;
 }
 
-.preview-link:hover {
-  color: #C4FF20;
-  text-decoration: underline;
+.product-image:hover {
+  transform: scale(1.02);
+  box-shadow: 0 12px 32px rgba(180, 240, 0, 0.15);
+  border-color: rgba(180, 240, 0, 0.4);
+}
+
+/* Two Column Layout */
+.two-column-layout {
+  display: flex;
+  flex-direction: column;
+  gap: 2rem;
+  margin-bottom: 3rem;
+  align-items: center;
+}
+
+.column-content {
+  flex: 1;
+  width: 100%;
+}
+
+.column-image {
+  flex: 1;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.feature-image {
+  width: 100%;
+  max-width: 500px;
+  height: auto;
+  border-radius: 12px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+  border: 1px solid rgba(180, 240, 0, 0.2);
+  transition: all 0.4s ease;
+}
+
+.feature-image:hover {
+  transform: scale(1.03) rotate(1deg);
+  box-shadow: 0 12px 32px rgba(180, 240, 0, 0.15);
+  border-color: rgba(180, 240, 0, 0.4);
 }
 
 /* Footer */
@@ -382,6 +436,55 @@ small {
   margin-top: 1rem;
   font-size: 0.875rem;
   color: rgba(230, 237, 243, 0.5);
+}
+
+/* ============================================
+   ANIMATIONS
+   ============================================ */
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(20px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes slideInLeft {
+  from {
+    opacity: 0;
+    transform: translateX(-30px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@keyframes slideInRight {
+  from {
+    opacity: 0;
+    transform: translateX(30px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.fade-in {
+  animation: fadeIn 0.8s ease-out;
+}
+
+.slide-in-left {
+  animation: slideInLeft 0.8s ease-out;
+}
+
+.slide-in-right {
+  animation: slideInRight 0.8s ease-out;
 }
 
 /* ============================================
@@ -426,6 +529,21 @@ small {
 
   .form-container {
     flex-wrap: nowrap;
+  }
+
+  /* Two column layout for tablets and up */
+  .two-column-layout {
+    flex-direction: row;
+    gap: 3rem;
+  }
+
+  .two-column-layout.reverse {
+    flex-direction: row-reverse;
+  }
+
+  .column-content,
+  .column-image {
+    flex: 1;
   }
 }
 
