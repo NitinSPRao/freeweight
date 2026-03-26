@@ -29,12 +29,14 @@ class ExerciseResponse(BaseModel):
 class WorkoutCreate(BaseModel):
     name: str
     day_offset: int
+    description: Optional[str] = None
 
 class WorkoutResponse(BaseModel):
     id: int
     name: str
     day_offset: Optional[int] = None
     scheduled_date: Optional[datetime] = None
+    description: Optional[str] = None
     exercises: List[ExerciseResponse]
 
     class Config:

@@ -1,6 +1,6 @@
 "use client";
 
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useRouter } from "next/navigation";
 import { useState, useEffect } from "react";
 import { format, startOfMonth, endOfMonth, eachDayOfInterval, isSameMonth, isSameDay, addMonths, subMonths } from "date-fns";
@@ -16,6 +16,14 @@ export default function AthleteCalendarPage() {
   const [selectedDayWorkouts, setSelectedDayWorkouts] = useState<Workout[] | null>(null);
   const [selectedDate, setSelectedDate] = useState<Date | null>(null);
   const [mounted, setMounted] = useState(false);
+  const [showCreateModal, setShowCreateModal] = useState(false);
+  const [createDate, setCreateDate] = useState<Date | null>(null);
+  const [newWorkoutName, setNewWorkoutName] = useState("");
+  const [newWorkoutDescription, setNewWorkoutDescription] = useState("");
+  const [newExercises, setNewExercises] = useState<Array<{ name: string; sets: number; reps: number }>>([
+    { name: "", sets: 3, reps: 10 },
+  ]);
+  const [isCreating, setIsCreating] = useState(false);
 
   useEffect(() => {
     setMounted(true);
@@ -34,9 +42,54 @@ export default function AthleteCalendarPage() {
     enabled: mounted,
   });
 
+  const queryClient = useQueryClient();
+
   const handleDayClick = (workouts: Workout[], date: Date) => {
     setSelectedDayWorkouts(workouts.length > 0 ? workouts : []);
     setSelectedDate(date);
+  };
+
+  const openCreateModal = (date: Date, e: React.MouseEvent) => {
+    e.stopPropagation();
+    setCreateDate(date);
+    setNewWorkoutName("");
+    setNewWorkoutDescription("");
+    setNewExercises([{ name: "", sets: 3, reps: 10 }]);
+    setShowCreateModal(true);
+  };
+
+  const handleCreateWorkout = async () => {
+    if (!createDate || !newWorkoutName.trim()) return;
+    setIsCreating(true);
+    try {
+      const exercises = newExercises
+        .filter((ex) => ex.name.trim())
+        .map((ex, idx) => ({ ...ex, order: idx + 1 }));
+      await athleteApi.createWorkout({
+        name: newWorkoutName.trim(),
+        description: newWorkoutDescription.trim() || undefined,
+        scheduled_date: format(createDate, "yyyy-MM-dd"),
+        exercises,
+      });
+      queryClient.invalidateQueries({ queryKey: ["calendar"] });
+      setShowCreateModal(false);
+    } finally {
+      setIsCreating(false);
+    }
+  };
+
+  const addExerciseRow = () => {
+    setNewExercises([...newExercises, { name: "", sets: 3, reps: 10 }]);
+  };
+
+  const updateExerciseRow = (index: number, field: string, value: string | number) => {
+    setNewExercises(newExercises.map((ex, i) => i === index ? { ...ex, [field]: value } : ex));
+  };
+
+  const removeExerciseRow = (index: number) => {
+    if (newExercises.length > 1) {
+      setNewExercises(newExercises.filter((_, i) => i !== index));
+    }
   };
 
   const closeModal = () => {
@@ -132,11 +185,11 @@ export default function AthleteCalendarPage() {
                 const hasWorkout = dayWorkouts.length > 0;
 
                 return (
-                  <button
+                  <div
                     key={day.toISOString()}
                     onClick={() => handleDayClick(dayWorkouts, day)}
                     className={`
-                      min-h-[140px] p-2 rounded-lg border transition-all text-left flex flex-col
+                      group relative min-h-[140px] p-2 rounded-lg border transition-all text-left flex flex-col
                       ${isCurrentMonth ? "bg-background" : "bg-background/40"}
                       ${isToday ? "border-2 border-primary" : "border border-secondary/20"}
                       cursor-pointer hover:border-primary/60 hover:shadow-lg
@@ -198,11 +251,24 @@ export default function AthleteCalendarPage() {
                         ))}
                       </div>
                     ) : (
-                      <div className="flex-1 flex items-center justify-center">
-                        <span className="text-[10px] text-secondary/40 italic">Rest day</span>
-                      </div>
+                      <div className="flex-1" />
                     )}
-                  </button>
+
+                    {/* Add Workout Button — visible on hover */}
+                    <button
+                      onClick={(e) => openCreateModal(day, e)}
+                      className="
+                        opacity-0 group-hover:opacity-100 transition-opacity
+                        mt-1 w-full py-1 rounded border border-dashed border-secondary/30
+                        hover:border-primary hover:bg-primary/10
+                        text-secondary/50 hover:text-primary text-lg leading-none
+                        flex items-center justify-center
+                      "
+                      title={`Add workout on ${format(day, "MMM d")}`}
+                    >
+                      +
+                    </button>
+                  </div>
                 );
               })}
             </div>
@@ -294,14 +360,116 @@ export default function AthleteCalendarPage() {
                 </>
               ) : (
                 <div className="py-8">
-                  <p className="text-center text-secondary text-lg">No Lift assigned</p>
-                  <div className="mt-6">
-                    <button onClick={closeModal} className="btn-secondary w-full">
+                  <p className="text-center text-secondary text-lg">No workout scheduled</p>
+                  <div className="mt-6 flex gap-3">
+                    <button onClick={closeModal} className="btn-secondary flex-1">
                       Close
+                    </button>
+                    <button
+                      onClick={() => {
+                        closeModal();
+                        if (selectedDate) {
+                          setCreateDate(selectedDate);
+                          setNewWorkoutName("");
+                          setNewWorkoutDescription("");
+                          setNewExercises([{ name: "", sets: 3, reps: 10 }]);
+                          setShowCreateModal(true);
+                        }
+                      }}
+                      className="btn-primary flex-1"
+                    >
+                      Add Workout
                     </button>
                   </div>
                 </div>
               )}
+            </div>
+          </div>
+        )}
+        {/* Create Workout Modal */}
+        {showCreateModal && createDate && (
+          <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50" onClick={() => setShowCreateModal(false)}>
+            <div className="bg-[#1F2937] rounded-lg p-6 max-w-lg w-full max-h-[80vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+              <div className="flex justify-between items-start mb-4">
+                <div>
+                  <h3 className="text-xl font-heading font-bold text-text">New Workout</h3>
+                  <p className="text-secondary text-sm">{format(createDate, "EEEE, MMMM d, yyyy")}</p>
+                </div>
+                <button onClick={() => setShowCreateModal(false)} className="text-secondary hover:text-text text-2xl">×</button>
+              </div>
+
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm text-secondary mb-1">Workout Name</label>
+                  <input
+                    type="text"
+                    value={newWorkoutName}
+                    onChange={(e) => setNewWorkoutName(e.target.value)}
+                    placeholder="e.g. Upper Body Push"
+                    className="w-full bg-background border border-secondary/30 rounded-lg px-3 py-2 text-text placeholder-secondary/50 focus:border-primary focus:outline-none"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-sm text-secondary mb-1">Description (optional)</label>
+                  <input
+                    type="text"
+                    value={newWorkoutDescription}
+                    onChange={(e) => setNewWorkoutDescription(e.target.value)}
+                    placeholder="e.g. Focus on chest and shoulders"
+                    className="w-full bg-background border border-secondary/30 rounded-lg px-3 py-2 text-text placeholder-secondary/50 focus:border-primary focus:outline-none"
+                  />
+                </div>
+
+                <div>
+                  <div className="flex justify-between items-center mb-2">
+                    <label className="text-sm text-secondary">Exercises</label>
+                    <button onClick={addExerciseRow} className="text-primary text-sm hover:underline">+ Add Exercise</button>
+                  </div>
+                  <div className="space-y-2">
+                    {newExercises.map((ex, idx) => (
+                      <div key={idx} className="flex gap-2 items-center">
+                        <input
+                          type="text"
+                          value={ex.name}
+                          onChange={(e) => updateExerciseRow(idx, "name", e.target.value)}
+                          placeholder="Exercise name"
+                          className="flex-1 bg-background border border-secondary/30 rounded px-2 py-1.5 text-sm text-text placeholder-secondary/50 focus:border-primary focus:outline-none"
+                        />
+                        <input
+                          type="number"
+                          value={ex.sets}
+                          onChange={(e) => updateExerciseRow(idx, "sets", parseInt(e.target.value) || 0)}
+                          className="w-14 bg-background border border-secondary/30 rounded px-2 py-1.5 text-sm text-text text-center focus:border-primary focus:outline-none"
+                          title="Sets"
+                        />
+                        <span className="text-secondary text-sm">×</span>
+                        <input
+                          type="number"
+                          value={ex.reps}
+                          onChange={(e) => updateExerciseRow(idx, "reps", parseInt(e.target.value) || 0)}
+                          className="w-14 bg-background border border-secondary/30 rounded px-2 py-1.5 text-sm text-text text-center focus:border-primary focus:outline-none"
+                          title="Reps"
+                        />
+                        {newExercises.length > 1 && (
+                          <button onClick={() => removeExerciseRow(idx)} className="text-secondary hover:text-red-400 text-lg">×</button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              <div className="mt-6 flex gap-3">
+                <button onClick={() => setShowCreateModal(false)} className="btn-secondary flex-1">Cancel</button>
+                <button
+                  onClick={handleCreateWorkout}
+                  disabled={!newWorkoutName.trim() || isCreating}
+                  className="btn-primary flex-1 disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {isCreating ? "Creating..." : "Create Workout"}
+                </button>
+              </div>
             </div>
           </div>
         )}

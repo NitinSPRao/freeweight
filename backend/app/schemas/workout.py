@@ -21,6 +21,7 @@ class WorkoutResponse(BaseModel):
     id: int
     name: str
     scheduled_date: datetime
+    description: Optional[str] = None
     exercises: list[ExerciseResponse]
     workout_log_id: Optional[int] = None
     is_completed: bool
@@ -61,6 +62,7 @@ class SetLogCreate(BaseModel):
 
 class WorkoutComplete(BaseModel):
     notes: Optional[str] = None
+    rpe: Optional[int] = None  # Session-level RPE 1-10
 
 class FlagRequest(BaseModel):
     reason: str
@@ -75,6 +77,7 @@ class WorkoutLogResponse(BaseModel):
     has_modifications: bool
     is_flagged: bool
     flag_reason: Optional[str] = None
+    rpe: Optional[int] = None
     coach_acknowledged: bool = False
     coach_response: Optional[str] = None
 

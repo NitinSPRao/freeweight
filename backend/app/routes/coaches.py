@@ -3,6 +3,7 @@ from sqlalchemy.orm import Session
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 from pydantic import BaseModel
+import json
 from ..database import get_db
 from ..auth import get_current_coach
 from ..models import User, Group, Subgroup, WorkoutLog, AthleteMax, Workout, ProgramAssignment, group_members
@@ -308,6 +309,45 @@ def delete_group(
     db.commit()
 
     return {"message": "Group deleted successfully"}
+
+@router.get("/onboarding-settings")
+def get_onboarding_settings(
+    current_coach: User = Depends(get_current_coach),
+):
+    """Get the coach's onboarding skip fields."""
+    skip_fields = []
+    if current_coach.coach_onboarding_skip_fields:
+        skip_fields = json.loads(current_coach.coach_onboarding_skip_fields)
+    return {"skip_fields": skip_fields}
+
+
+@router.put("/onboarding-settings")
+def update_onboarding_settings(
+    data: dict,
+    current_coach: User = Depends(get_current_coach),
+    db: Session = Depends(get_db)
+):
+    """Set which onboarding fields athletes should skip."""
+    skip_fields = data.get("skip_fields", [])
+    current_coach.coach_onboarding_skip_fields = json.dumps(skip_fields)
+    db.commit()
+    return {"skip_fields": skip_fields}
+
+
+@router.get("/onboarding-config/{invite_code}")
+def get_onboarding_config(
+    invite_code: str,
+    db: Session = Depends(get_db)
+):
+    """Public endpoint — returns onboarding config for a coach's invite code."""
+    coach = db.query(User).filter(User.invite_code == invite_code.upper()).first()
+    if not coach:
+        raise HTTPException(status_code=404, detail="Invalid invite code")
+
+    skip_fields = []
+    if coach.coach_onboarding_skip_fields:
+        skip_fields = json.loads(coach.coach_onboarding_skip_fields)
+    return {"skip_fields": skip_fields, "coach_name": coach.name}
 
 @router.get("/athletes/{athlete_id}")
 def get_athlete_detail(

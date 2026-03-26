@@ -14,6 +14,8 @@ import {
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../../navigation/AppNavigator';
 import { athleteApi, Exercise, TodayWorkout } from '../../api/endpoints';
+import RestTimer from '../../components/RestTimer';
+import RPESlider from '../../components/RPESlider';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Workout'>;
 
@@ -52,6 +54,13 @@ export default function WorkoutScreen({ route, navigation }: Props) {
   const [showFlagForm, setShowFlagForm] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
+  // Rest timer state
+  const [showRestTimer, setShowRestTimer] = useState(false);
+
+  // Debrief state
+  const [debriefRpe, setDebriefRpe] = useState<number | null>(null);
+  const [debriefNotes, setDebriefNotes] = useState('');
+
   useEffect(() => {
     athleteApi
       .getWorkout(workoutId)
@@ -83,6 +92,10 @@ export default function WorkoutScreen({ route, navigation }: Props) {
     0
   );
   const completionProgress = totalSets > 0 ? completedSets / totalSets : 0;
+
+  const isLastSetOfLastExercise =
+    currentExerciseIdx === (workout?.exercises.length ?? 1) - 1 &&
+    currentSetIdx === (currentLog?.sets.length ?? 1) - 1;
 
   const startWorkout = async () => {
     try {
@@ -135,18 +148,24 @@ export default function WorkoutScreen({ route, navigation }: Props) {
       });
       setExerciseLogs(updated);
 
+      // Check if this was the last set of the last exercise
+      const wasLastSet = isLastSetOfLastExercise;
+
       // Advance
       const nextSet = currentSetIdx + 1;
       if (nextSet < currentLog.sets.length) {
         setCurrentSetIdx(nextSet);
       } else {
-        // Move to next exercise
         const nextEx = currentExerciseIdx + 1;
         if (nextEx < (workout?.exercises.length ?? 0)) {
           setCurrentExerciseIdx(nextEx);
           setCurrentSetIdx(0);
         }
-        // If all done, the allExercisesComplete flag will update
+      }
+
+      // Show rest timer unless it was the final set
+      if (!wasLastSet) {
+        setShowRestTimer(true);
       }
     } catch {
       Alert.alert('Error', 'Failed to log set. Try again.');
@@ -158,7 +177,10 @@ export default function WorkoutScreen({ route, navigation }: Props) {
   const finishWorkout = async () => {
     setSubmitting(true);
     try {
-      await athleteApi.completeWorkout(workoutId);
+      await athleteApi.completeWorkout(workoutId, {
+        notes: debriefNotes.trim() || undefined,
+        rpe: debriefRpe ?? undefined,
+      });
       setIsComplete(true);
     } catch {
       Alert.alert('Error', 'Failed to complete workout.');
@@ -248,10 +270,28 @@ export default function WorkoutScreen({ route, navigation }: Props) {
       ) : (
         <ScrollView style={{ flex: 1 }} keyboardShouldPersistTaps="handled">
           {allExercisesComplete ? (
-            /* All sets logged — finish */
-            <View style={styles.finishContainer}>
-              <Text style={styles.finishTitle}>All exercises complete</Text>
-              <Text style={styles.finishSub}>Ready to mark this session done?</Text>
+            /* Debrief — RPE + notes before finishing */
+            <View style={styles.debriefContainer}>
+              <Text style={styles.debriefTitle}>Session Debrief</Text>
+              <Text style={styles.debriefSub}>How did this workout feel?</Text>
+
+              <View style={styles.debriefSection}>
+                <RPESlider value={debriefRpe} onChange={setDebriefRpe} />
+              </View>
+
+              <View style={styles.debriefSection}>
+                <Text style={styles.debriefLabel}>NOTES (OPTIONAL)</Text>
+                <TextInput
+                  style={styles.debriefInput}
+                  placeholder="Any thoughts on the session..."
+                  placeholderTextColor="#5A6572"
+                  value={debriefNotes}
+                  onChangeText={setDebriefNotes}
+                  multiline
+                  numberOfLines={3}
+                />
+              </View>
+
               <TouchableOpacity
                 style={styles.primaryButton}
                 onPress={finishWorkout}
@@ -262,6 +302,17 @@ export default function WorkoutScreen({ route, navigation }: Props) {
                 ) : (
                   <Text style={styles.primaryButtonText}>FINISH WORKOUT</Text>
                 )}
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={styles.skipDebriefButton}
+                onPress={() => {
+                  setDebriefRpe(null);
+                  setDebriefNotes('');
+                  finishWorkout();
+                }}
+              >
+                <Text style={styles.skipDebriefText}>Skip debrief</Text>
               </TouchableOpacity>
             </View>
           ) : (
@@ -276,6 +327,13 @@ export default function WorkoutScreen({ route, navigation }: Props) {
                     ? ` • ${Math.round(currentExercise.target_weight)} lbs`
                     : ''}
                 </Text>
+
+                {/* Workout description */}
+                {workout.description && currentExerciseIdx === 0 && (
+                  <View style={styles.descriptionCard}>
+                    <Text style={styles.descriptionText}>{workout.description}</Text>
+                  </View>
+                )}
 
                 {currentExercise?.video_url && (
                   <View style={styles.videoCard}>
@@ -361,6 +419,12 @@ export default function WorkoutScreen({ route, navigation }: Props) {
           )}
         </ScrollView>
       )}
+
+      {/* Rest Timer */}
+      <RestTimer
+        visible={showRestTimer}
+        onDismiss={() => setShowRestTimer(false)}
+      />
 
       {/* Flag form overlay */}
       {showFlagForm && (
@@ -460,40 +524,6 @@ const styles = StyleSheet.create({
     height: '100%',
     backgroundColor: '#C8FF00',
   },
-  exerciseList: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    padding: 20,
-    gap: 8,
-  },
-  exerciseChip: {
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 16,
-    backgroundColor: '#1F2937',
-    borderWidth: 1,
-    borderColor: '#2D3748',
-    maxWidth: 140,
-  },
-  exerciseChipActive: {
-    borderColor: '#B4F000',
-    backgroundColor: 'rgba(180, 240, 0, 0.08)',
-  },
-  exerciseChipDone: {
-    borderColor: '#2D3748',
-    backgroundColor: '#1C2128',
-  },
-  exerciseChipText: {
-    fontSize: 12,
-    color: '#5A6572',
-  },
-  exerciseChipTextActive: {
-    color: '#B4F000',
-    fontWeight: '600',
-  },
-  exerciseChipTextDone: {
-    color: '#3A4A5A',
-  },
   activeExercise: {
     flex: 1,
   },
@@ -501,13 +531,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     paddingTop: 24,
     paddingBottom: 12,
-  },
-  exerciseLabel: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: '#5A6572',
-    letterSpacing: 1.5,
-    marginBottom: 8,
   },
   exerciseName: {
     fontSize: 34,
@@ -520,37 +543,48 @@ const styles = StyleSheet.create({
     color: '#888888',
     marginBottom: 18,
   },
-  targetBadge: {
-    backgroundColor: 'rgba(180, 240, 0, 0.08)',
-    borderWidth: 1,
-    borderColor: 'rgba(180, 240, 0, 0.2)',
-    borderRadius: 8,
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    alignSelf: 'flex-start',
-    marginBottom: 14,
+  descriptionCard: {
+    backgroundColor: '#1C1C1E',
+    borderRadius: 12,
+    padding: 14,
+    marginBottom: 16,
+    borderLeftWidth: 3,
+    borderLeftColor: '#C8FF00',
   },
-  targetText: {
-    color: '#B4F000',
+  descriptionText: {
     fontSize: 13,
-    fontWeight: '600',
+    color: '#B0B0B0',
+    lineHeight: 20,
   },
-  notesCard: {
+  videoCard: {
+    height: 150,
     backgroundColor: '#1C1C1E',
     borderRadius: 16,
-    padding: 14,
+    borderWidth: 1,
+    borderColor: '#2A2A2E',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 18,
   },
-  notesLabel: {
-    fontSize: 10,
-    fontWeight: '700',
-    color: '#5A6572',
-    letterSpacing: 1.5,
-    marginBottom: 4,
+  playButton: {
+    width: 58,
+    height: 58,
+    borderRadius: 29,
+    backgroundColor: '#C8FF00',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 10,
   },
-  notesText: {
+  playIcon: {
+    color: '#0A0A0A',
+    fontSize: 20,
+    fontWeight: '800',
+    marginLeft: 2,
+  },
+  videoLabel: {
+    color: '#888888',
     fontSize: 13,
-    color: '#FFFFFF',
-    lineHeight: 20,
+    fontWeight: '600',
   },
   setLogger: {
     paddingHorizontal: 20,
@@ -620,36 +654,6 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
     fontSize: 14,
   },
-  videoCard: {
-    height: 150,
-    backgroundColor: '#1C1C1E',
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: '#2A2A2E',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 18,
-  },
-  playButton: {
-    width: 58,
-    height: 58,
-    borderRadius: 29,
-    backgroundColor: '#C8FF00',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 10,
-  },
-  playIcon: {
-    color: '#0A0A0A',
-    fontSize: 20,
-    fontWeight: '800',
-    marginLeft: 2,
-  },
-  videoLabel: {
-    color: '#888888',
-    fontSize: 13,
-    fontWeight: '600',
-  },
   notesSection: {
     marginTop: 8,
     marginBottom: 16,
@@ -660,45 +664,15 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     marginBottom: 8,
   },
-  setLabel: {
-    fontSize: 11,
-    fontWeight: '700',
-    color: '#5A6572',
-    letterSpacing: 1.5,
-    marginBottom: 20,
-    textAlign: 'center',
+  notesCard: {
+    backgroundColor: '#1C1C1E',
+    borderRadius: 16,
+    padding: 14,
   },
-  inputRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#1F2937',
-    borderRadius: 12,
-    marginBottom: 20,
-    overflow: 'hidden',
-  },
-  inputBlock: {
-    flex: 1,
-    alignItems: 'center',
-    paddingVertical: 20,
-  },
-  inputDivider: {
-    width: 1,
-    height: 60,
-    backgroundColor: '#2D3748',
-  },
-  inputLabel: {
-    fontSize: 10,
-    fontWeight: '700',
-    color: '#5A6572',
-    letterSpacing: 1.5,
-    marginBottom: 8,
-  },
-  bigInput: {
-    fontSize: 36,
-    fontWeight: 'bold',
-    color: '#E6EDF3',
-    textAlign: 'center',
-    width: '80%',
+  notesText: {
+    fontSize: 13,
+    color: '#FFFFFF',
+    lineHeight: 20,
   },
   primaryButton: {
     backgroundColor: '#C8FF00',
@@ -716,21 +690,53 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     letterSpacing: 1,
   },
-  finishContainer: {
+  // Debrief
+  debriefContainer: {
     padding: 24,
-    gap: 12,
-    alignItems: 'center',
+    gap: 16,
   },
-  finishTitle: {
-    fontSize: 22,
+  debriefTitle: {
+    fontSize: 26,
     fontWeight: 'bold',
     color: '#FFFFFF',
+    textAlign: 'center',
   },
-  finishSub: {
+  debriefSub: {
     fontSize: 14,
     color: '#888888',
+    textAlign: 'center',
     marginBottom: 8,
   },
+  debriefSection: {
+    marginBottom: 8,
+  },
+  debriefLabel: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#5A6572',
+    letterSpacing: 1.5,
+    marginBottom: 8,
+  },
+  debriefInput: {
+    backgroundColor: '#1C1C1E',
+    color: '#FFFFFF',
+    borderRadius: 12,
+    padding: 14,
+    fontSize: 15,
+    minHeight: 80,
+    textAlignVertical: 'top',
+    borderWidth: 1,
+    borderColor: '#252528',
+  },
+  skipDebriefButton: {
+    padding: 14,
+    alignItems: 'center',
+  },
+  skipDebriefText: {
+    color: '#5A6572',
+    fontSize: 13,
+  },
+  // Completed
   completedContainer: {
     flex: 1,
     alignItems: 'center',
@@ -752,6 +758,23 @@ const styles = StyleSheet.create({
     color: '#888888',
     marginBottom: 16,
   },
+  // Finish
+  finishContainer: {
+    padding: 24,
+    gap: 12,
+    alignItems: 'center',
+  },
+  finishTitle: {
+    fontSize: 22,
+    fontWeight: 'bold',
+    color: '#FFFFFF',
+  },
+  finishSub: {
+    fontSize: 14,
+    color: '#888888',
+    marginBottom: 8,
+  },
+  // Flag
   flagOverlay: {
     ...StyleSheet.absoluteFillObject,
     backgroundColor: 'rgba(0,0,0,0.7)',

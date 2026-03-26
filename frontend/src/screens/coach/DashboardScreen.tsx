@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -8,7 +8,7 @@ import {
   ActivityIndicator,
   Alert,
 } from 'react-native';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../../navigation/AppNavigator';
 import { useAuth } from '../../hooks/useAuth';
@@ -27,12 +27,53 @@ const ACCENT = '#4df0c8';
 
 // ─── Dashboard Tab ─────────────────────────────────────────────────────────────
 
+const ONBOARDING_FIELDS: { key: string; label: string }[] = [
+  { key: 'sport', label: 'Sport' },
+  { key: 'team', label: 'Team' },
+  { key: 'training_goals', label: 'Training Goals' },
+  { key: 'injuries', label: 'Injuries' },
+  { key: 'experience_level', label: 'Experience Level' },
+  { key: 'maxes', label: 'Current Maxes' },
+];
+
 function DashboardTab({ onLogout }: { onLogout: () => Promise<void> }) {
+  const queryClient = useQueryClient();
+
   const { data, isLoading } = useQuery({
     queryKey: ['coachDashboard'],
     queryFn: () => coachApi.getDashboard().then((r) => r.data),
     refetchInterval: 60_000,
   });
+
+  const { data: onboardingSettings } = useQuery({
+    queryKey: ['coachOnboardingSettings'],
+    queryFn: () => coachApi.getOnboardingSettings().then((r) => r.data),
+  });
+
+  const [skipFields, setSkipFields] = useState<string[]>([]);
+
+  useEffect(() => {
+    if (onboardingSettings?.skip_fields) {
+      setSkipFields(onboardingSettings.skip_fields);
+    }
+  }, [onboardingSettings]);
+
+  const updateSettingsMutation = useMutation({
+    mutationFn: (skip_fields: string[]) => coachApi.updateOnboardingSettings(skip_fields),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['coachOnboardingSettings'] });
+      Alert.alert('Saved', 'Onboarding settings updated.');
+    },
+    onError: () => Alert.alert('Error', 'Failed to save settings.'),
+  });
+
+  const toggleField = (fieldKey: string) => {
+    setSkipFields((prev) =>
+      prev.includes(fieldKey)
+        ? prev.filter((f) => f !== fieldKey)
+        : [...prev, fieldKey]
+    );
+  };
 
   const handleInvite = async () => {
     try {
@@ -97,6 +138,53 @@ function DashboardTab({ onLogout }: { onLogout: () => Promise<void> }) {
           <Text style={[styles.outlineButtonText, { color: ACCENT }]}>
             COPY INVITE LINK
           </Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* Onboarding settings */}
+      <View style={styles.section}>
+        <Text style={styles.sectionLabel}>ONBOARDING SETTINGS</Text>
+        <Text style={styles.onboardingHint}>
+          Tap a field to skip it during athlete onboarding.
+        </Text>
+        <View style={styles.onboardingFieldsContainer}>
+          {ONBOARDING_FIELDS.map((field) => {
+            const isSkipped = skipFields.includes(field.key);
+            return (
+              <TouchableOpacity
+                key={field.key}
+                style={[
+                  styles.onboardingFieldChip,
+                  isSkipped && styles.onboardingFieldChipSkipped,
+                ]}
+                onPress={() => toggleField(field.key)}
+                activeOpacity={0.7}
+              >
+                <Text
+                  style={[
+                    styles.onboardingFieldLabel,
+                    isSkipped && styles.onboardingFieldLabelSkipped,
+                  ]}
+                >
+                  {field.label}
+                </Text>
+                <Text style={[styles.onboardingFieldStatus, isSkipped ? { color: '#FF4D4F' } : { color: ACCENT }]}>
+                  {isSkipped ? 'SKIP' : 'SHOW'}
+                </Text>
+              </TouchableOpacity>
+            );
+          })}
+        </View>
+        <TouchableOpacity
+          style={[styles.primaryButton, { marginTop: 12, opacity: updateSettingsMutation.isPending ? 0.6 : 1 }]}
+          onPress={() => updateSettingsMutation.mutate(skipFields)}
+          disabled={updateSettingsMutation.isPending}
+        >
+          {updateSettingsMutation.isPending ? (
+            <ActivityIndicator color="#14181C" size="small" />
+          ) : (
+            <Text style={[styles.primaryButtonText, { color: '#14181C' }]}>SAVE</Text>
+          )}
         </TouchableOpacity>
       </View>
 
@@ -486,5 +574,43 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: '#5A6572',
     fontWeight: '600',
+  },
+  onboardingHint: {
+    fontSize: 12,
+    color: '#5A6572',
+    marginBottom: 12,
+    lineHeight: 18,
+  },
+  onboardingFieldsContainer: {
+    gap: 8,
+  },
+  onboardingFieldChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    backgroundColor: '#1F2937',
+    borderRadius: 10,
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(77,240,200,0.15)',
+  },
+  onboardingFieldChipSkipped: {
+    borderColor: 'rgba(255,77,79,0.2)',
+    backgroundColor: 'rgba(255,77,79,0.05)',
+  },
+  onboardingFieldLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#E6EDF3',
+  },
+  onboardingFieldLabelSkipped: {
+    textDecorationLine: 'line-through',
+    color: '#5A6572',
+  },
+  onboardingFieldStatus: {
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 1,
   },
 });

@@ -16,7 +16,9 @@ import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../../navigation/AppNavigator';
 import { useAuth } from '../../hooks/useAuth';
 import BottomTabBar, { Tab } from '../../components/BottomTabBar';
-import { athleteApi, CalendarWorkout, ProgressResponse } from '../../api/endpoints';
+import ExercisePicker from '../../components/ExercisePicker';
+import AddWorkoutModal from '../../components/AddWorkoutModal';
+import { athleteApi, CalendarWorkout, ProgressResponse, StrengthGoal } from '../../api/endpoints';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'AthleteHome'>;
 
@@ -30,11 +32,23 @@ function formatDate(date: Date): string {
   return date.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' });
 }
 
+/** Returns RPE-based color for completed workouts */
+function getRpeColor(rpe: number | null): string {
+  if (rpe === null) return '#2E7D32';
+  if (rpe <= 3) return '#4CAF50';
+  if (rpe <= 6) return '#FFC107';
+  if (rpe <= 8) return '#FF9800';
+  return '#F44336';
+}
+
 // ─── Home Tab ────────────────────────────────────────────────────────────────
 
 function HomeTab({ navigation }: { navigation: Props['navigation'] }) {
+  const queryClient = useQueryClient();
   const today = new Date();
   const todayKey = today.toISOString().slice(0, 10);
+
+  const [showAddWorkout, setShowAddWorkout] = useState(false);
 
   const { data: todayWorkout, isLoading: workoutLoading, error: workoutError } = useQuery({
     queryKey: ['todayWorkout'],
@@ -80,6 +94,18 @@ function HomeTab({ navigation }: { navigation: Props['navigation'] }) {
   const isLoading = workoutLoading || calendarLoading;
   const hasError = Boolean(workoutError || calendarError);
 
+  // Feature 9 — Generate program mutation
+  const generateProgramMutation = useMutation({
+    mutationFn: () => athleteApi.generateProgram({}),
+    onSuccess: (response) => {
+      const { program_name, weeks } = response.data;
+      Alert.alert('Program Generated', `"${program_name}" — ${weeks} week${weeks !== 1 ? 's' : ''} created.`);
+      queryClient.invalidateQueries({ queryKey: ['calendar'] });
+      queryClient.invalidateQueries({ queryKey: ['todayWorkout'] });
+    },
+    onError: () => Alert.alert('Error', 'Failed to generate program. Try again.'),
+  });
+
   return (
     <ScrollView style={styles.tabContent} showsVerticalScrollIndicator={false}>
       <Text style={styles.dateLabel}>{formatDate(today).toUpperCase()}</Text>
@@ -100,6 +126,10 @@ function HomeTab({ navigation }: { navigation: Props['navigation'] }) {
         ) : todayWorkout ? (
           <View style={[styles.card, styles.workoutCard]}>
             <Text style={styles.workoutName}>{todayWorkout.name}</Text>
+            {/* Feature 10 — Workout description */}
+            {todayWorkout.description ? (
+              <Text style={styles.workoutDescription}>{todayWorkout.description}</Text>
+            ) : null}
             <Text style={styles.workoutMeta}>
               {todayWorkout.exercises.length} exercise{todayWorkout.exercises.length !== 1 ? 's' : ''}
             </Text>
@@ -149,6 +179,9 @@ function HomeTab({ navigation }: { navigation: Props['navigation'] }) {
             const dayWorkouts = workoutsByDate[dateStr] ?? [];
             const hasWorkout = dayWorkouts.length > 0;
             const isCompleted = dayWorkouts.some((w) => w.is_completed);
+            // Feature 8 — RPE color coding
+            const completedWorkout = dayWorkouts.find((w) => w.is_completed);
+            const rpeColor = completedWorkout ? getRpeColor(completedWorkout.rpe) : '#2E7D32';
             return (
               <View key={i} style={styles.dayCell}>
                 <Text style={[styles.dayLabel, isToday && styles.dayLabelToday]}>
@@ -156,7 +189,12 @@ function HomeTab({ navigation }: { navigation: Props['navigation'] }) {
                 </Text>
                 {hasWorkout ? (
                   isCompleted ? (
-                    <View style={[styles.dayCheck, isToday && styles.dayCheckToday]}>
+                    <View
+                      style={[
+                        styles.dayCheck,
+                        { backgroundColor: isToday ? '#B4F000' : rpeColor },
+                      ]}
+                    >
                       <Text style={styles.dayCheckText}>✓</Text>
                     </View>
                   ) : (
@@ -178,9 +216,50 @@ function HomeTab({ navigation }: { navigation: Props['navigation'] }) {
             );
           })}
         </View>
+        {/* Feature 11 — Add workout button */}
+        <TouchableOpacity
+          style={styles.addWorkoutButton}
+          onPress={() => setShowAddWorkout(true)}
+          activeOpacity={0.7}
+        >
+          <Text style={styles.addWorkoutButtonText}>+</Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* Feature 9 — Generate program card */}
+      <View style={styles.section}>
+        <Text style={styles.sectionLabel}>GENERATE PLAN</Text>
+        <View style={styles.card}>
+          <Text style={styles.generateDescription}>
+            Auto-generate a multi-week program based on your goals
+          </Text>
+          <TouchableOpacity
+            style={[styles.generateButton, generateProgramMutation.isPending && styles.generateButtonDisabled]}
+            onPress={() => generateProgramMutation.mutate()}
+            disabled={generateProgramMutation.isPending}
+            activeOpacity={0.8}
+          >
+            {generateProgramMutation.isPending ? (
+              <ActivityIndicator size="small" color="#14181C" />
+            ) : (
+              <Text style={styles.generateButtonText}>GENERATE PLAN</Text>
+            )}
+          </TouchableOpacity>
+        </View>
       </View>
 
       <View style={{ height: 24 }} />
+
+      {/* Feature 11 — AddWorkoutModal */}
+      <AddWorkoutModal
+        visible={showAddWorkout}
+        onClose={() => setShowAddWorkout(false)}
+        selectedDate={todayKey}
+        onWorkoutCreated={() => {
+          queryClient.invalidateQueries({ queryKey: ['calendar'] });
+          queryClient.invalidateQueries({ queryKey: ['todayWorkout'] });
+        }}
+      />
     </ScrollView>
   );
 }
@@ -197,9 +276,24 @@ function ProgressTab() {
   const [newLiftWeight, setNewLiftWeight] = useState('');
   const [showAddForm, setShowAddForm] = useState(false);
 
+  // Goals state
+  const [goalMode, setGoalMode] = useState<'lift' | 'qualitative'>('lift');
+  const [goalExercise, setGoalExercise] = useState('');
+  const [goalTargetWeight, setGoalTargetWeight] = useState('');
+  const [goalTargetDate, setGoalTargetDate] = useState('');
+  const [goalText, setGoalText] = useState('');
+  const [showGoalForm, setShowGoalForm] = useState(false);
+
   const { data: progress = [], isLoading, error } = useQuery({
     queryKey: ['progress'],
     queryFn: athleteApi.getProgress,
+    select: (response) => response.data,
+  });
+
+  // Feature 2 — Goals query
+  const { data: goals = [], isLoading: goalsLoading } = useQuery({
+    queryKey: ['goals'],
+    queryFn: athleteApi.getGoals,
     select: (response) => response.data,
   });
 
@@ -213,6 +307,50 @@ function ProgressTab() {
     },
     onError: () => Alert.alert('Error', 'Failed to update max. Try again.'),
   });
+
+  // Feature 1 — Delete max mutation
+  const deleteMaxMutation = useMutation({
+    mutationFn: (exerciseName: string) => athleteApi.deleteMax(exerciseName),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['progress'] });
+    },
+    onError: () => Alert.alert('Error', 'Failed to delete max. Try again.'),
+  });
+
+  // Feature 2 — Goal mutations
+  const createGoalMutation = useMutation({
+    mutationFn: (data: Parameters<typeof athleteApi.createGoal>[0]) =>
+      athleteApi.createGoal(data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['goals'] });
+      resetGoalForm();
+    },
+    onError: () => Alert.alert('Error', 'Failed to create goal. Try again.'),
+  });
+
+  const completeGoalMutation = useMutation({
+    mutationFn: (id: number) => athleteApi.completeGoal(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['goals'] });
+    },
+    onError: () => Alert.alert('Error', 'Failed to complete goal. Try again.'),
+  });
+
+  const deleteGoalMutation = useMutation({
+    mutationFn: (id: number) => athleteApi.deleteGoal(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['goals'] });
+    },
+    onError: () => Alert.alert('Error', 'Failed to delete goal. Try again.'),
+  });
+
+  const resetGoalForm = () => {
+    setGoalExercise('');
+    setGoalTargetWeight('');
+    setGoalTargetDate('');
+    setGoalText('');
+    setShowGoalForm(false);
+  };
 
   // Flatten: one entry per exercise (last data point = current max)
   const maxes: Array<{ name: string; weight: number; unit: string }> = progress.map((p: ProgressResponse) => ({
@@ -248,6 +386,71 @@ function ProgressTab() {
           setShowAddForm(false);
         },
       }
+    );
+  };
+
+  // Feature 1 — Delete max handler
+  const handleDeleteMax = (exerciseName: string) => {
+    Alert.alert(
+      'Delete Max',
+      `Are you sure you want to delete "${exerciseName}"?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: () => deleteMaxMutation.mutate(exerciseName),
+        },
+      ]
+    );
+  };
+
+  // Feature 2 — Create goal handler
+  const handleCreateGoal = () => {
+    if (goalMode === 'lift') {
+      const exercise = goalExercise.trim();
+      const tw = parseFloat(goalTargetWeight);
+      if (!exercise) {
+        Alert.alert('Missing exercise', 'Select an exercise for the goal.');
+        return;
+      }
+      if (!tw || tw <= 0) {
+        Alert.alert('Invalid weight', 'Enter a valid target weight.');
+        return;
+      }
+      createGoalMutation.mutate({
+        goal_type: 'lift',
+        exercise_name: exercise,
+        target_weight: tw,
+        target_date: goalTargetDate.trim() || undefined,
+      });
+    } else {
+      const text = goalText.trim();
+      if (!text) {
+        Alert.alert('Missing goal', 'Enter your qualitative goal.');
+        return;
+      }
+      createGoalMutation.mutate({
+        goal_type: 'qualitative',
+        qualitative_goal: text,
+      });
+    }
+  };
+
+  // Feature 2 — Delete goal handler
+  const handleDeleteGoal = (goal: StrengthGoal) => {
+    const label = goal.goal_type === 'lift' ? goal.exercise_name : (goal.qualitative_goal ?? 'this goal');
+    Alert.alert(
+      'Delete Goal',
+      `Are you sure you want to delete "${label}"?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: () => deleteGoalMutation.mutate(goal.id),
+        },
+      ]
     );
   };
 
@@ -305,14 +508,20 @@ function ProgressTab() {
                       <Text style={styles.maxWeight}>
                         {m.weight} <Text style={styles.maxUnit}>{m.unit}</Text>
                       </Text>
-                      <TouchableOpacity
-                        onPress={() => {
-                          setEditingLift(m.name);
-                          setEditWeight(String(m.weight));
-                        }}
-                      >
-                        <Text style={styles.editText}>Edit</Text>
-                      </TouchableOpacity>
+                      <View style={styles.maxActions}>
+                        <TouchableOpacity
+                          onPress={() => {
+                            setEditingLift(m.name);
+                            setEditWeight(String(m.weight));
+                          }}
+                        >
+                          <Text style={styles.editText}>Edit</Text>
+                        </TouchableOpacity>
+                        {/* Feature 1 — Delete max button */}
+                        <TouchableOpacity onPress={() => handleDeleteMax(m.name)}>
+                          <Text style={styles.deleteText}>Delete</Text>
+                        </TouchableOpacity>
+                      </View>
                     </View>
                   )}
                 </View>
@@ -328,14 +537,14 @@ function ProgressTab() {
         {showAddForm ? (
           <View style={styles.addMaxForm}>
             <Text style={styles.addMaxLabel}>ADD LIFT</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="Lift name (e.g. squat)"
-              placeholderTextColor="#5A6572"
-              value={newLiftName}
-              onChangeText={setNewLiftName}
-              autoCapitalize="none"
-            />
+            {/* Feature 1 — ExercisePicker replaces TextInput for lift name */}
+            <View style={{ marginBottom: 12 }}>
+              <ExercisePicker
+                selectedValue={newLiftName}
+                onSelect={(name) => setNewLiftName(name)}
+                placeholder="Select exercise"
+              />
+            </View>
             <View style={styles.weightRow}>
               <TextInput
                 style={[styles.input, { flex: 1 }]}
@@ -365,6 +574,164 @@ function ProgressTab() {
           </TouchableOpacity>
         )}
 
+        {/* Feature 2 — Goals section */}
+        <View style={styles.section}>
+          <Text style={styles.sectionLabel}>MY GOALS</Text>
+
+          {goalsLoading ? (
+            <ActivityIndicator color="#B4F000" style={{ marginTop: 16 }} />
+          ) : goals.length === 0 && !showGoalForm ? (
+            <View style={styles.emptyState}>
+              <Text style={styles.emptyText}>No goals set yet.</Text>
+              <Text style={styles.emptySubtext}>Add a goal to track your progress.</Text>
+            </View>
+          ) : (
+            goals.map((goal: StrengthGoal) => (
+              <View key={goal.id} style={styles.goalRow}>
+                <View style={styles.goalContent}>
+                  {goal.goal_type === 'lift' ? (
+                    <>
+                      <Text style={styles.goalTitle}>
+                        {goal.exercise_name
+                          ? goal.exercise_name.charAt(0).toUpperCase() + goal.exercise_name.slice(1)
+                          : 'Lift Goal'}
+                      </Text>
+                      <Text style={styles.goalMeta}>
+                        Target: {goal.target_weight} lbs
+                        {goal.target_date ? ` by ${goal.target_date}` : ''}
+                      </Text>
+                    </>
+                  ) : (
+                    <Text style={styles.goalTitle}>{goal.qualitative_goal}</Text>
+                  )}
+                  {goal.is_completed && (
+                    <Text style={styles.goalCompletedLabel}>COMPLETED</Text>
+                  )}
+                </View>
+                <View style={styles.goalActions}>
+                  {!goal.is_completed && (
+                    <TouchableOpacity
+                      onPress={() => completeGoalMutation.mutate(goal.id)}
+                      style={styles.goalActionButton}
+                    >
+                      <Text style={styles.goalCheckText}>✓</Text>
+                    </TouchableOpacity>
+                  )}
+                  <TouchableOpacity
+                    onPress={() => handleDeleteGoal(goal)}
+                    style={styles.goalActionButton}
+                  >
+                    <Text style={styles.goalDeleteText}>✕</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            ))
+          )}
+
+          {/* Add goal form */}
+          {showGoalForm ? (
+            <View style={styles.addGoalForm}>
+              <Text style={styles.addMaxLabel}>NEW GOAL</Text>
+              {/* Goal type toggle */}
+              <View style={styles.goalToggleRow}>
+                <TouchableOpacity
+                  style={[
+                    styles.goalToggle,
+                    goalMode === 'lift' && styles.goalToggleActive,
+                  ]}
+                  onPress={() => setGoalMode('lift')}
+                >
+                  <Text
+                    style={[
+                      styles.goalToggleText,
+                      goalMode === 'lift' && styles.goalToggleTextActive,
+                    ]}
+                  >
+                    Lift Goal
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[
+                    styles.goalToggle,
+                    goalMode === 'qualitative' && styles.goalToggleActive,
+                  ]}
+                  onPress={() => setGoalMode('qualitative')}
+                >
+                  <Text
+                    style={[
+                      styles.goalToggleText,
+                      goalMode === 'qualitative' && styles.goalToggleTextActive,
+                    ]}
+                  >
+                    Qualitative
+                  </Text>
+                </TouchableOpacity>
+              </View>
+
+              {goalMode === 'lift' ? (
+                <>
+                  <View style={{ marginBottom: 12 }}>
+                    <ExercisePicker
+                      selectedValue={goalExercise}
+                      onSelect={(name) => setGoalExercise(name)}
+                      placeholder="Select exercise"
+                    />
+                  </View>
+                  <TextInput
+                    style={styles.input}
+                    placeholder="Target weight (lbs)"
+                    placeholderTextColor="#5A6572"
+                    value={goalTargetWeight}
+                    onChangeText={setGoalTargetWeight}
+                    keyboardType="numeric"
+                  />
+                  <TextInput
+                    style={styles.input}
+                    placeholder="Target date (YYYY-MM-DD, optional)"
+                    placeholderTextColor="#5A6572"
+                    value={goalTargetDate}
+                    onChangeText={setGoalTargetDate}
+                    autoCapitalize="none"
+                  />
+                </>
+              ) : (
+                <TextInput
+                  style={styles.input}
+                  placeholder="Describe your goal"
+                  placeholderTextColor="#5A6572"
+                  value={goalText}
+                  onChangeText={setGoalText}
+                  autoCapitalize="sentences"
+                />
+              )}
+
+              <TouchableOpacity
+                style={[styles.addButton, createGoalMutation.isPending && { opacity: 0.6 }]}
+                onPress={handleCreateGoal}
+                disabled={createGoalMutation.isPending}
+              >
+                {createGoalMutation.isPending ? (
+                  <ActivityIndicator size="small" color="#14181C" />
+                ) : (
+                  <Text style={styles.addButtonText}>ADD GOAL</Text>
+                )}
+              </TouchableOpacity>
+              <TouchableOpacity onPress={resetGoalForm}>
+                <Text style={[styles.cancelText, { textAlign: 'center', marginTop: 8 }]}>
+                  Cancel
+                </Text>
+              </TouchableOpacity>
+            </View>
+          ) : (
+            <TouchableOpacity
+              style={styles.outlineButton}
+              onPress={() => setShowGoalForm(true)}
+            >
+              <Text style={styles.outlineButtonText}>+ ADD GOAL</Text>
+            </TouchableOpacity>
+          )}
+        </View>
+
         <View style={{ height: 24 }} />
       </ScrollView>
     </KeyboardAvoidingView>
@@ -374,7 +741,19 @@ function ProgressTab() {
 // ─── Profile Tab ──────────────────────────────────────────────────────────────
 
 function ProfileTab() {
-  const { user, logout } = useAuth();
+  const { user, logout, refreshUser } = useAuth();
+  const [inviteCode, setInviteCode] = useState('');
+
+  const joinCoachMutation = useMutation({
+    mutationFn: (code: string) => athleteApi.joinCoach(code),
+    onSuccess: async (response) => {
+      const { coach_name } = response.data;
+      Alert.alert('Joined!', `You are now connected to coach ${coach_name}.`);
+      setInviteCode('');
+      await refreshUser();
+    },
+    onError: () => Alert.alert('Error', 'Invalid invite code or failed to join. Try again.'),
+  });
 
   const initials = user?.name
     .split(' ')
@@ -396,6 +775,48 @@ function ProfileTab() {
             {[user.sport, user.team].filter(Boolean).join(' · ')}
           </Text>
         )}
+      </View>
+
+      {/* Feature 5 — My Coach section */}
+      <View style={styles.section}>
+        <Text style={styles.sectionLabel}>MY COACH</Text>
+        <View style={styles.card}>
+          {user?.coach_name ? (
+            <>
+              <Text style={styles.infoLabel}>Coach</Text>
+              <Text style={styles.infoValue}>{user.coach_name}</Text>
+            </>
+          ) : (
+            <>
+              <Text style={styles.coachPrompt}>Enter your coach&apos;s invite code to connect.</Text>
+              <View style={styles.joinCoachRow}>
+                <TextInput
+                  style={[styles.input, { flex: 1, marginBottom: 0 }]}
+                  placeholder="Invite code"
+                  placeholderTextColor="#5A6572"
+                  value={inviteCode}
+                  onChangeText={setInviteCode}
+                  autoCapitalize="none"
+                  autoCorrect={false}
+                />
+                <TouchableOpacity
+                  style={[
+                    styles.joinButton,
+                    (joinCoachMutation.isPending || !inviteCode.trim()) && { opacity: 0.5 },
+                  ]}
+                  onPress={() => joinCoachMutation.mutate(inviteCode.trim())}
+                  disabled={joinCoachMutation.isPending || !inviteCode.trim()}
+                >
+                  {joinCoachMutation.isPending ? (
+                    <ActivityIndicator size="small" color="#14181C" />
+                  ) : (
+                    <Text style={styles.joinButtonText}>JOIN</Text>
+                  )}
+                </TouchableOpacity>
+              </View>
+            </>
+          )}
+        </View>
       </View>
 
       {user?.training_goals ? (
@@ -527,6 +948,12 @@ const styles = StyleSheet.create({
     color: '#E6EDF3',
     marginBottom: 6,
   },
+  // Feature 10 — Workout description style
+  workoutDescription: {
+    fontSize: 13,
+    color: '#5A6572',
+    marginBottom: 6,
+  },
   workoutMeta: {
     fontSize: 13,
     color: '#5A6572',
@@ -644,6 +1071,46 @@ const styles = StyleSheet.create({
   dayNumToday: {
     color: '#E6EDF3',
   },
+  // Feature 11 — Add workout button
+  addWorkoutButton: {
+    alignSelf: 'center',
+    marginTop: 12,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: '#B4F000',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  addWorkoutButtonText: {
+    color: '#B4F000',
+    fontSize: 20,
+    fontWeight: '600',
+    lineHeight: 22,
+  },
+  // Feature 9 — Generate program styles
+  generateDescription: {
+    fontSize: 14,
+    color: '#5A6572',
+    marginBottom: 16,
+    lineHeight: 20,
+  },
+  generateButton: {
+    backgroundColor: '#B4F000',
+    paddingVertical: 14,
+    borderRadius: 8,
+    alignItems: 'center',
+  },
+  generateButtonDisabled: {
+    opacity: 0.6,
+  },
+  generateButtonText: {
+    color: '#14181C',
+    fontSize: 14,
+    fontWeight: '800',
+    letterSpacing: 1,
+  },
   // Progress tab
   emptyState: {
     alignItems: 'center',
@@ -685,8 +1152,18 @@ const styles = StyleSheet.create({
     color: '#5A6572',
     fontWeight: 'normal',
   },
+  maxActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 16,
+  },
   editText: {
     color: '#B4F000',
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  deleteText: {
+    color: '#F44336',
     fontSize: 13,
     fontWeight: '600',
   },
@@ -790,6 +1267,115 @@ const styles = StyleSheet.create({
     color: '#B4F000',
     fontSize: 14,
     fontWeight: '700',
+    letterSpacing: 0.5,
+  },
+  // Feature 2 — Goal styles
+  goalRow: {
+    backgroundColor: '#1F2937',
+    borderRadius: 12,
+    padding: 16,
+    marginBottom: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  goalContent: {
+    flex: 1,
+  },
+  goalTitle: {
+    fontSize: 15,
+    fontWeight: '600',
+    color: '#E6EDF3',
+  },
+  goalMeta: {
+    fontSize: 13,
+    color: '#5A6572',
+    marginTop: 4,
+  },
+  goalCompletedLabel: {
+    fontSize: 10,
+    fontWeight: '700',
+    color: '#B4F000',
+    letterSpacing: 1,
+    marginTop: 4,
+  },
+  goalActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  goalActionButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.05)',
+  },
+  goalCheckText: {
+    color: '#B4F000',
+    fontSize: 16,
+    fontWeight: '800',
+  },
+  goalDeleteText: {
+    color: '#F44336',
+    fontSize: 16,
+    fontWeight: '800',
+  },
+  addGoalForm: {
+    backgroundColor: '#1F2937',
+    borderRadius: 12,
+    padding: 20,
+    marginBottom: 16,
+  },
+  goalToggleRow: {
+    flexDirection: 'row',
+    marginBottom: 16,
+    gap: 8,
+  },
+  goalToggle: {
+    flex: 1,
+    paddingVertical: 10,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#2D3748',
+    alignItems: 'center',
+  },
+  goalToggleActive: {
+    borderColor: '#B4F000',
+    backgroundColor: 'rgba(180, 240, 0, 0.08)',
+  },
+  goalToggleText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#5A6572',
+  },
+  goalToggleTextActive: {
+    color: '#B4F000',
+  },
+  // Feature 5 — Profile coach section styles
+  coachPrompt: {
+    fontSize: 14,
+    color: '#5A6572',
+    marginBottom: 14,
+  },
+  joinCoachRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  joinButton: {
+    backgroundColor: '#B4F000',
+    paddingHorizontal: 20,
+    paddingVertical: 14,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    minWidth: 72,
+  },
+  joinButtonText: {
+    color: '#14181C',
+    fontSize: 14,
+    fontWeight: '800',
     letterSpacing: 0.5,
   },
   // Profile tab

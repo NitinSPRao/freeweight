@@ -35,6 +35,8 @@ class CalendarWorkout(BaseModel):
     scheduled_date: datetime
     is_completed: bool
     is_flagged: bool
+    rpe: Optional[int] = None
+    description: Optional[str] = None
     exercises: list[CalendarExerciseSummary] = []
 
     class Config:
@@ -48,14 +50,35 @@ class ProgressDataPoint(BaseModel):
 
 class StrengthGoalResponse(BaseModel):
     id: int
-    exercise_name: str
-    starting_weight: float
-    target_weight: float
-    target_date: datetime
+    goal_type: str = "lift"
+    exercise_name: Optional[str] = None
+    starting_weight: Optional[float] = None
+    target_weight: Optional[float] = None
+    qualitative_goal: Optional[str] = None
+    target_date: Optional[datetime] = None
+    is_completed: bool = False
     created_at: datetime
 
     class Config:
         from_attributes = True
+
+
+class StrengthGoalCreate(BaseModel):
+    goal_type: str = "lift"  # "lift" or "qualitative"
+    exercise_name: Optional[str] = None
+    starting_weight: Optional[float] = None
+    target_weight: Optional[float] = None
+    qualitative_goal: Optional[str] = None
+    target_date: Optional[str] = None  # ISO date string
+
+
+class StrengthGoalUpdate(BaseModel):
+    exercise_name: Optional[str] = None
+    starting_weight: Optional[float] = None
+    target_weight: Optional[float] = None
+    qualitative_goal: Optional[str] = None
+    target_date: Optional[str] = None
+    is_completed: Optional[bool] = None
 
 
 class ProgressResponse(BaseModel):
@@ -63,3 +86,24 @@ class ProgressResponse(BaseModel):
     current_max: Optional[float] = None
     data: list[ProgressDataPoint]
     goal: Optional[StrengthGoalResponse] = None
+
+
+class JoinCoachRequest(BaseModel):
+    invite_code: str
+
+
+class GenerateProgramRequest(BaseModel):
+    weeks: Optional[int] = None
+    target_date: Optional[str] = None  # ISO date string
+    goals: Optional[list[str]] = None
+
+
+class CreateWorkoutRequest(BaseModel):
+    name: str
+    description: Optional[str] = None
+    scheduled_date: str  # ISO date string
+    exercises: list[dict] = []  # [{name, sets, reps, percentage_of_max?, target_exercise?, coach_notes?, order}]
+
+
+class CopyWorkoutRequest(BaseModel):
+    scheduled_date: str  # ISO date string

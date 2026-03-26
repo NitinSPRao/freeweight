@@ -56,6 +56,7 @@ class User(Base):
     coaching_credentials = Column(Text, nullable=True)
     bio = Column(Text, nullable=True)
     invite_code = Column(String(6), unique=True, nullable=True, index=True)  # 6-char code for coaches
+    coach_onboarding_skip_fields = Column(Text, nullable=True)  # JSON list of fields to skip during athlete onboarding
 
     # Relationships
     coached_athletes = relationship(
@@ -89,10 +90,13 @@ class StrengthGoal(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     athlete_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    exercise_name = Column(String, nullable=False)  # e.g., "squat", "bench", "deadlift", "clean"
-    starting_weight = Column(Float, nullable=False)
-    target_weight = Column(Float, nullable=False)
-    target_date = Column(DateTime(timezone=True), nullable=False)
+    goal_type = Column(String, default="lift", nullable=False)  # "lift" or "qualitative"
+    exercise_name = Column(String, nullable=True)  # required for lift goals
+    starting_weight = Column(Float, nullable=True)  # required for lift goals
+    target_weight = Column(Float, nullable=True)  # required for lift goals
+    qualitative_goal = Column(Text, nullable=True)  # free text for qualitative goals
+    target_date = Column(DateTime(timezone=True), nullable=True)
+    is_completed = Column(Boolean, default=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     athlete = relationship("User", back_populates="strength_goals")
@@ -161,6 +165,7 @@ class Workout(Base):
     name = Column(String, nullable=False)
     scheduled_date = Column(DateTime(timezone=True), nullable=False)
     day_offset = Column(Integer, nullable=True)  # Days from program start for template workouts
+    description = Column(Text, nullable=True)  # Purpose/rationale of the workout
     athlete_modified = Column(Boolean, default=False)  # True if athlete edited a coach-assigned workout
     modification_notes = Column(Text, nullable=True)  # What the athlete changed
     created_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -197,6 +202,7 @@ class WorkoutLog(Base):
     is_completed = Column(Boolean, default=False)
     has_modifications = Column(Boolean, default=False)
     notes = Column(Text, nullable=True)
+    rpe = Column(Integer, nullable=True)  # Session-level Rate of Perceived Exertion (1-10)
     is_flagged = Column(Boolean, default=False)
     flag_reason = Column(Text, nullable=True)
     coach_acknowledged = Column(Boolean, default=False)
@@ -225,3 +231,14 @@ class SetLog(Base):
 
     workout_log = relationship("WorkoutLog", back_populates="set_logs")
     exercise = relationship("Exercise", back_populates="set_logs")
+
+class ExerciseCatalog(Base):
+    __tablename__ = "exercise_catalog"
+
+    id = Column(Integer, primary_key=True, index=True)
+    name = Column(String, nullable=False, index=True)
+    category = Column(String, nullable=True)  # compound, isolation, accessory, cardio, mobility
+    muscle_group = Column(String, nullable=True)  # legs, chest, back, shoulders, arms, core, full_body
+    is_custom = Column(Boolean, default=False)
+    created_by = Column(Integer, ForeignKey("users.id"), nullable=True)  # null for predefined
+    created_at = Column(DateTime(timezone=True), server_default=func.now())

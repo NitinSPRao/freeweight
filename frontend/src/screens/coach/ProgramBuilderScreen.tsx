@@ -15,6 +15,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../../navigation/AppNavigator';
 import { programsApi, coachApi, AthleteWithGroups } from '../../api/endpoints';
+import ExercisePicker from '../../components/ExercisePicker';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'ProgramBuilder'>;
 
@@ -340,13 +341,11 @@ export default function ProgramBuilderScreen({ navigation }: Props) {
 
                 {addingExerciseToSession === si ? (
                   <View style={styles.addExerciseForm}>
-                    <TextInput
-                      style={styles.input}
-                      value={newExercise.name}
-                      onChangeText={(v) => setNewExercise((p) => ({ ...p, name: v }))}
-                      placeholder="Exercise name"
-                      placeholderTextColor="#5A6572"
-                      autoFocus
+                    <ExercisePicker
+                      selectedValue={newExercise.name}
+                      onSelect={(name) => setNewExercise((p) => ({ ...p, name }))}
+                      placeholder="Select exercise"
+                      accentColor={ACCENT}
                     />
                     <View style={styles.twoCol}>
                       <View style={{ flex: 1 }}>

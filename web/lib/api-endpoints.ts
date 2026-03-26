@@ -268,6 +268,24 @@ export const athleteApi = {
     const response = await apiClient.put("/api/athletes/coach", { invite_code });
     return response.data;
   },
+
+  createWorkout: async (data: {
+    name: string;
+    description?: string;
+    scheduled_date: string;
+    exercises: Array<{
+      name: string;
+      sets: number;
+      reps: number;
+      percentage_of_max?: number;
+      target_exercise?: string;
+      coach_notes?: string;
+      order: number;
+    }>;
+  }) => {
+    const response = await apiClient.post<Workout>("/api/athletes/workouts", data);
+    return response.data;
+  },
 };
 
 // ============================================================================

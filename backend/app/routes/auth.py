@@ -19,7 +19,7 @@ def generate_invite_code() -> str:
 
 
 def _user_dict(user: User) -> dict:
-    return {
+    result = {
         "id": user.id,
         "email": user.email,
         "name": user.name,
@@ -35,6 +35,17 @@ def _user_dict(user: User) -> dict:
         "profile_photo_url": user.profile_photo_url,
         "invite_code": user.invite_code if user.user_type == UserType.COACH else None
     }
+
+    # Include coach info for athletes
+    if user.user_type == UserType.ATHLETE and hasattr(user, 'coaches') and user.coaches:
+        coach = user.coaches[0]
+        result["coach_name"] = coach.name
+        result["coach_id"] = coach.id
+    else:
+        result["coach_name"] = None
+        result["coach_id"] = None
+
+    return result
 
 
 @router.post("/signup", response_model=TokenResponse, status_code=status.HTTP_201_CREATED)

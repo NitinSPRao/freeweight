@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from .routes import auth, coaches, programs, athletes
+from .routes import auth, coaches, programs, athletes, exercises
 
 app = FastAPI(title="Freeweight API", version="1.0.0")
 
@@ -26,6 +26,7 @@ app.include_router(auth.router)
 app.include_router(coaches.router)
 app.include_router(programs.router)
 app.include_router(athletes.router)
+app.include_router(exercises.router)
 
 @app.get("/")
 def root():

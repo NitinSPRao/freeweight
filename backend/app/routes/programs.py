@@ -41,6 +41,7 @@ def _serialize_program(program: Program, include_workouts: bool = True) -> Progr
                 name=workout.name,
                 day_offset=workout.day_offset,
                 scheduled_date=workout.scheduled_date,
+                description=workout.description,
                 exercises=exercises
             ))
 
@@ -130,6 +131,7 @@ def add_workout_to_program(
         program_id=program_id,
         name=workout_data.name,
         day_offset=workout_data.day_offset,
+        description=workout_data.description,
         scheduled_date=datetime.utcnow()
     )
     db.add(new_workout)
@@ -141,6 +143,7 @@ def add_workout_to_program(
         name=new_workout.name,
         day_offset=new_workout.day_offset,
         scheduled_date=new_workout.scheduled_date,
+        description=new_workout.description,
         exercises=[]
     )
 
@@ -255,6 +258,7 @@ def assign_program(
                 program_id=program_id,
                 athlete_id=athlete.id,
                 name=template.name,
+                description=template.description,
                 scheduled_date=scheduled_date,
                 day_offset=day_offset
             )

@@ -7,7 +7,12 @@ import base64
 from ..database import get_db
 from ..auth import get_current_athlete
 from .. import models
-from ..schemas.athlete import OnboardingRequest, MaxUpdate, CalendarWorkout, CalendarExerciseSummary, ProgressResponse, ProgressDataPoint, StrengthGoalResponse
+from ..schemas.athlete import (
+    OnboardingRequest, MaxUpdate, CalendarWorkout, CalendarExerciseSummary,
+    ProgressResponse, ProgressDataPoint, StrengthGoalResponse,
+    StrengthGoalCreate, StrengthGoalUpdate, JoinCoachRequest,
+    GenerateProgramRequest, CreateWorkoutRequest, CopyWorkoutRequest
+)
 from ..schemas.workout import WorkoutResponse, ExerciseResponse, SetLogCreate, WorkoutComplete, FlagRequest, WorkoutLogResponse, WorkoutEdit
 
 router = APIRouter(prefix="/api/athletes", tags=["athletes"])
@@ -49,6 +54,7 @@ def _build_workout_response(workout: models.Workout, current_athlete: models.Use
         id=workout.id,
         name=workout.name,
         scheduled_date=workout.scheduled_date,
+        description=workout.description,
         exercises=exercises,
         workout_log_id=workout_log.id if workout_log else None,
         is_completed=workout_log.is_completed if workout_log else False,
@@ -95,12 +101,12 @@ def complete_onboarding(
             target_weight = goal_data.get("target_weight")
             target_date_str = goal_data.get("target_date")
             if target_weight and target_date_str:
-                # Use current max as starting weight, or 0 if not set
                 starting_weight = 0.0
                 if data.maxes and exercise_name in data.maxes:
                     starting_weight = data.maxes[exercise_name]
                 db.add(models.StrengthGoal(
                     athlete_id=current_athlete.id,
+                    goal_type="lift",
                     exercise_name=exercise_name,
                     starting_weight=starting_weight,
                     target_weight=float(target_weight),
@@ -115,13 +121,12 @@ def complete_onboarding(
     return {"message": "Onboarding completed successfully"}
 
 
-def _generate_starter_program(athlete: models.User, data: OnboardingRequest, db: Session):
+def _generate_starter_program(athlete: models.User, data: OnboardingRequest, db: Session, weeks: int = 1):
     """Generate a starter training program based on athlete goals and experience."""
     goals = (data.training_goals or "").lower()
     level = (data.experience_level or "beginner").lower()
     injuries = (data.injuries or "").lower()
 
-    # Choose program template based on goals
     if "strength" in goals:
         program_name = "Strength Builder"
         program_desc = "A compound-focused strength program to build your maxes."
@@ -139,72 +144,91 @@ def _generate_starter_program(athlete: models.User, data: OnboardingRequest, db:
         program_desc = "A well-rounded full-body program to build a strong foundation."
         workouts = _general_template(level)
 
-    # Filter out exercises that target injured areas
     if injuries:
         workouts = _filter_for_injuries(workouts, injuries)
 
-    # Create the program (self-programmed, no coach_id)
     program = models.Program(
-        coach_id=athlete.id,  # athlete owns their own program
+        coach_id=athlete.id,
         name=program_name,
         description=program_desc
     )
     db.add(program)
     db.flush()
 
-    # Create workouts and exercises, materialized for the athlete
     today = datetime.utcnow().date()
-    for day_offset, workout_data in enumerate(workouts):
-        scheduled = datetime(today.year, today.month, today.day) + timedelta(days=day_offset)
-        workout = models.Workout(
-            program_id=program.id,
-            athlete_id=athlete.id,
-            name=workout_data["name"],
-            scheduled_date=scheduled,
-            day_offset=day_offset
-        )
-        db.add(workout)
-        db.flush()
+    week_length = len(workouts)
 
-        for order, ex in enumerate(workout_data["exercises"], 1):
-            db.add(models.Exercise(
-                workout_id=workout.id,
-                name=ex["name"],
-                sets=ex["sets"],
-                reps=ex["reps"],
-                percentage_of_max=ex.get("percentage"),
-                target_exercise=ex.get("target"),
-                coach_notes=ex.get("notes"),
-                order=order
-            ))
+    for week in range(weeks):
+        pct_bump = 0.025 * week  # Progressive overload: +2.5% per week
+        for day_idx, workout_data in enumerate(workouts):
+            day_offset = week * week_length + day_idx
+            scheduled = datetime(today.year, today.month, today.day) + timedelta(days=day_offset)
+
+            # Deload week every 4th week
+            is_deload = (week > 0 and (week + 1) % 4 == 0)
+
+            desc = workout_data.get("description", "")
+            if is_deload:
+                desc = f"Deload week — lighter loads for recovery. {desc}"
+
+            workout = models.Workout(
+                program_id=program.id,
+                athlete_id=athlete.id,
+                name=workout_data["name"],
+                description=desc or None,
+                scheduled_date=scheduled,
+                day_offset=day_offset
+            )
+            db.add(workout)
+            db.flush()
+
+            for order, ex in enumerate(workout_data["exercises"], 1):
+                pct = ex.get("percentage")
+                if pct and not is_deload:
+                    pct = min(pct + pct_bump, 0.95)
+                elif pct and is_deload:
+                    pct = pct * 0.7  # 70% of normal for deload
+
+                db.add(models.Exercise(
+                    workout_id=workout.id,
+                    name=ex["name"],
+                    sets=ex["sets"],
+                    reps=ex["reps"],
+                    percentage_of_max=pct,
+                    target_exercise=ex.get("target"),
+                    coach_notes=ex.get("notes"),
+                    order=order
+                ))
+
+    return program
 
 
 def _strength_template(level: str) -> list[dict]:
     pct = {"beginner": 0.65, "intermediate": 0.75, "advanced": 0.85}.get(level, 0.65)
     pct2 = pct + 0.05
     return [
-        {"name": "Day 1 — Squat Focus", "exercises": [
+        {"name": "Day 1 — Squat Focus", "description": "Primary squat day — build lower body strength with compound movements.", "exercises": [
             {"name": "Back Squat", "sets": 5, "reps": 5, "percentage": pct2, "target": "squat"},
             {"name": "Romanian Deadlift", "sets": 3, "reps": 8, "percentage": 0.55, "target": "deadlift"},
             {"name": "Leg Press", "sets": 3, "reps": 10},
             {"name": "Plank", "sets": 3, "reps": 60, "notes": "Hold for 60 seconds"},
         ]},
-        {"name": "Day 2 — Bench Focus", "exercises": [
+        {"name": "Day 2 — Bench Focus", "description": "Primary bench day — build upper body pressing strength.", "exercises": [
             {"name": "Bench Press", "sets": 5, "reps": 5, "percentage": pct2, "target": "bench"},
             {"name": "Overhead Press", "sets": 3, "reps": 8, "percentage": 0.60, "target": "bench"},
             {"name": "Barbell Row", "sets": 4, "reps": 8},
             {"name": "Tricep Dips", "sets": 3, "reps": 10},
         ]},
-        {"name": "Day 3 — Rest", "exercises": [
+        {"name": "Day 3 — Rest", "description": "Active recovery — light movement to promote blood flow and recovery.", "exercises": [
             {"name": "Light Cardio / Mobility", "sets": 1, "reps": 1, "notes": "20-30 min easy cardio or stretching"},
         ]},
-        {"name": "Day 4 — Deadlift Focus", "exercises": [
+        {"name": "Day 4 — Deadlift Focus", "description": "Primary deadlift day — build posterior chain strength.", "exercises": [
             {"name": "Deadlift", "sets": 5, "reps": 3, "percentage": pct2, "target": "deadlift"},
             {"name": "Front Squat", "sets": 3, "reps": 6, "percentage": 0.60, "target": "squat"},
             {"name": "Pull-Ups", "sets": 4, "reps": 8},
             {"name": "Hanging Leg Raise", "sets": 3, "reps": 12},
         ]},
-        {"name": "Day 5 — Accessory", "exercises": [
+        {"name": "Day 5 — Accessory", "description": "Accessory work — address weak points and build muscular balance.", "exercises": [
             {"name": "Incline Dumbbell Press", "sets": 3, "reps": 10},
             {"name": "Dumbbell Lunges", "sets": 3, "reps": 12},
             {"name": "Face Pulls", "sets": 3, "reps": 15},
@@ -216,7 +240,7 @@ def _strength_template(level: str) -> list[dict]:
 def _hypertrophy_template(level: str) -> list[dict]:
     base_sets = {"beginner": 3, "intermediate": 4, "advanced": 4}.get(level, 3)
     return [
-        {"name": "Day 1 — Push", "exercises": [
+        {"name": "Day 1 — Push", "description": "Push day — chest, shoulders, and triceps volume.", "exercises": [
             {"name": "Bench Press", "sets": base_sets, "reps": 10, "percentage": 0.65, "target": "bench"},
             {"name": "Incline Dumbbell Press", "sets": base_sets, "reps": 12},
             {"name": "Overhead Press", "sets": base_sets, "reps": 10},
@@ -224,7 +248,7 @@ def _hypertrophy_template(level: str) -> list[dict]:
             {"name": "Lateral Raises", "sets": 3, "reps": 15},
             {"name": "Tricep Pushdowns", "sets": 3, "reps": 12},
         ]},
-        {"name": "Day 2 — Pull", "exercises": [
+        {"name": "Day 2 — Pull", "description": "Pull day — back and biceps volume.", "exercises": [
             {"name": "Barbell Row", "sets": base_sets, "reps": 10},
             {"name": "Pull-Ups", "sets": base_sets, "reps": 8},
             {"name": "Seated Cable Row", "sets": 3, "reps": 12},
@@ -232,24 +256,24 @@ def _hypertrophy_template(level: str) -> list[dict]:
             {"name": "Barbell Curl", "sets": 3, "reps": 12},
             {"name": "Hammer Curls", "sets": 3, "reps": 12},
         ]},
-        {"name": "Day 3 — Legs", "exercises": [
+        {"name": "Day 3 — Legs", "description": "Leg day — quad, hamstring, and calf development.", "exercises": [
             {"name": "Back Squat", "sets": base_sets, "reps": 10, "percentage": 0.65, "target": "squat"},
             {"name": "Romanian Deadlift", "sets": base_sets, "reps": 10, "percentage": 0.55, "target": "deadlift"},
             {"name": "Leg Press", "sets": 3, "reps": 12},
             {"name": "Leg Curl", "sets": 3, "reps": 12},
             {"name": "Calf Raises", "sets": 4, "reps": 15},
         ]},
-        {"name": "Day 4 — Rest", "exercises": [
+        {"name": "Day 4 — Rest", "description": "Recovery day — light cardio and stretching.", "exercises": [
             {"name": "Light Cardio / Stretching", "sets": 1, "reps": 1, "notes": "20-30 min recovery"},
         ]},
-        {"name": "Day 5 — Upper", "exercises": [
+        {"name": "Day 5 — Upper", "description": "Upper body volume — shoulders, arms, and chest.", "exercises": [
             {"name": "Overhead Press", "sets": base_sets, "reps": 10},
             {"name": "Weighted Dips", "sets": base_sets, "reps": 10},
             {"name": "Dumbbell Row", "sets": 3, "reps": 12},
             {"name": "Lateral Raises", "sets": 3, "reps": 15},
             {"name": "Skull Crushers", "sets": 3, "reps": 12},
         ]},
-        {"name": "Day 6 — Legs", "exercises": [
+        {"name": "Day 6 — Legs", "description": "Second leg day — variation and accessory work.", "exercises": [
             {"name": "Front Squat", "sets": base_sets, "reps": 8, "percentage": 0.60, "target": "squat"},
             {"name": "Walking Lunges", "sets": 3, "reps": 12},
             {"name": "Leg Extension", "sets": 3, "reps": 15},
@@ -262,30 +286,30 @@ def _hypertrophy_template(level: str) -> list[dict]:
 def _athletic_template(level: str) -> list[dict]:
     pct = {"beginner": 0.60, "intermediate": 0.70, "advanced": 0.80}.get(level, 0.60)
     return [
-        {"name": "Day 1 — Power", "exercises": [
+        {"name": "Day 1 — Power", "description": "Explosive power development — Olympic lifts and plyometrics.", "exercises": [
             {"name": "Power Clean", "sets": 5, "reps": 3, "percentage": pct, "target": "clean"},
             {"name": "Back Squat", "sets": 4, "reps": 5, "percentage": pct, "target": "squat"},
             {"name": "Box Jumps", "sets": 4, "reps": 5, "notes": "Focus on explosive hip extension"},
             {"name": "Plank", "sets": 3, "reps": 45, "notes": "Hold for 45 seconds"},
         ]},
-        {"name": "Day 2 — Upper Strength", "exercises": [
+        {"name": "Day 2 — Upper Strength", "description": "Upper body strength for sport performance.", "exercises": [
             {"name": "Bench Press", "sets": 4, "reps": 6, "percentage": pct, "target": "bench"},
             {"name": "Weighted Pull-Ups", "sets": 4, "reps": 6},
             {"name": "Dumbbell Shoulder Press", "sets": 3, "reps": 8},
             {"name": "Medicine Ball Slams", "sets": 3, "reps": 10, "notes": "Explosive"},
         ]},
-        {"name": "Day 3 — Conditioning", "exercises": [
+        {"name": "Day 3 — Conditioning", "description": "Sport-specific conditioning and agility work.", "exercises": [
             {"name": "Sprint Intervals", "sets": 8, "reps": 1, "notes": "30s sprint, 60s rest"},
             {"name": "Agility Ladder Drills", "sets": 4, "reps": 1, "notes": "Various patterns"},
             {"name": "Bodyweight Circuit", "sets": 3, "reps": 1, "notes": "10 push-ups, 10 squats, 10 burpees"},
         ]},
-        {"name": "Day 4 — Lower Strength", "exercises": [
+        {"name": "Day 4 — Lower Strength", "description": "Lower body strength and posterior chain development.", "exercises": [
             {"name": "Deadlift", "sets": 4, "reps": 5, "percentage": pct, "target": "deadlift"},
             {"name": "Bulgarian Split Squats", "sets": 3, "reps": 8},
             {"name": "Glute-Ham Raise", "sets": 3, "reps": 10},
             {"name": "Single-Leg Calf Raises", "sets": 3, "reps": 12},
         ]},
-        {"name": "Day 5 — Sport Skills + Recovery", "exercises": [
+        {"name": "Day 5 — Sport Skills + Recovery", "description": "Active recovery with sport-specific skill work.", "exercises": [
             {"name": "Sport-Specific Drills", "sets": 1, "reps": 1, "notes": "30 min sport practice"},
             {"name": "Foam Rolling / Mobility", "sets": 1, "reps": 1, "notes": "20 min recovery"},
         ]},
@@ -296,28 +320,28 @@ def _general_template(level: str) -> list[dict]:
     pct = {"beginner": 0.60, "intermediate": 0.70, "advanced": 0.75}.get(level, 0.60)
     base_sets = {"beginner": 3, "intermediate": 3, "advanced": 4}.get(level, 3)
     return [
-        {"name": "Day 1 — Full Body A", "exercises": [
+        {"name": "Day 1 — Full Body A", "description": "Full body session A — compound lifts for overall strength.", "exercises": [
             {"name": "Back Squat", "sets": base_sets, "reps": 8, "percentage": pct, "target": "squat"},
             {"name": "Bench Press", "sets": base_sets, "reps": 8, "percentage": pct, "target": "bench"},
             {"name": "Barbell Row", "sets": base_sets, "reps": 10},
             {"name": "Plank", "sets": 3, "reps": 45, "notes": "Hold for 45 seconds"},
         ]},
-        {"name": "Day 2 — Cardio + Core", "exercises": [
+        {"name": "Day 2 — Cardio + Core", "description": "Cardiovascular conditioning and core stability.", "exercises": [
             {"name": "Cardio", "sets": 1, "reps": 1, "notes": "25-30 min moderate intensity"},
             {"name": "Russian Twists", "sets": 3, "reps": 20},
             {"name": "Dead Bug", "sets": 3, "reps": 12},
             {"name": "Stretching", "sets": 1, "reps": 1, "notes": "10 min full body stretch"},
         ]},
-        {"name": "Day 3 — Full Body B", "exercises": [
+        {"name": "Day 3 — Full Body B", "description": "Full body session B — deadlift focus with pressing.", "exercises": [
             {"name": "Deadlift", "sets": base_sets, "reps": 6, "percentage": pct, "target": "deadlift"},
             {"name": "Overhead Press", "sets": base_sets, "reps": 8},
             {"name": "Pull-Ups", "sets": base_sets, "reps": 8},
             {"name": "Dumbbell Lunges", "sets": 3, "reps": 10},
         ]},
-        {"name": "Day 4 — Rest", "exercises": [
+        {"name": "Day 4 — Rest", "description": "Active recovery — light walking and stretching.", "exercises": [
             {"name": "Light Walk / Stretching", "sets": 1, "reps": 1, "notes": "Active recovery"},
         ]},
-        {"name": "Day 5 — Full Body C", "exercises": [
+        {"name": "Day 5 — Full Body C", "description": "Full body session C — front squat variation with accessories.", "exercises": [
             {"name": "Front Squat", "sets": base_sets, "reps": 8, "percentage": 0.55, "target": "squat"},
             {"name": "Incline Dumbbell Press", "sets": base_sets, "reps": 10},
             {"name": "Seated Cable Row", "sets": base_sets, "reps": 10},
@@ -350,6 +374,8 @@ def _filter_for_injuries(workouts: list[dict], injuries: str) -> list[dict]:
     return filtered
 
 
+# ─── Max Lifts ────────────────────────────────────────────────────────────────
+
 @router.put("/maxes")
 def update_max(
     data: MaxUpdate,
@@ -379,6 +405,165 @@ def update_max(
     db.commit()
     return {"message": "Max updated successfully"}
 
+
+@router.delete("/maxes/{exercise_name}")
+def delete_max(
+    exercise_name: str,
+    current_athlete: models.User = Depends(get_current_athlete),
+    db: Session = Depends(get_db)
+):
+    athlete_max = db.query(models.AthleteMax).filter(
+        and_(
+            models.AthleteMax.athlete_id == current_athlete.id,
+            models.AthleteMax.exercise_name == exercise_name
+        )
+    ).first()
+
+    if not athlete_max:
+        raise HTTPException(status_code=404, detail="Max not found")
+
+    db.delete(athlete_max)
+    db.commit()
+    return {"message": "Max deleted successfully"}
+
+
+# ─── Strength Goals ───────────────────────────────────────────────────────────
+
+@router.get("/goals", response_model=list[StrengthGoalResponse])
+def get_goals(
+    current_athlete: models.User = Depends(get_current_athlete),
+    db: Session = Depends(get_db)
+):
+    goals = db.query(models.StrengthGoal).filter(
+        models.StrengthGoal.athlete_id == current_athlete.id
+    ).order_by(models.StrengthGoal.created_at.desc()).all()
+    return goals
+
+
+@router.post("/goals", response_model=StrengthGoalResponse, status_code=status.HTTP_201_CREATED)
+def create_goal(
+    data: StrengthGoalCreate,
+    current_athlete: models.User = Depends(get_current_athlete),
+    db: Session = Depends(get_db)
+):
+    if data.goal_type == "lift":
+        if not data.exercise_name or data.target_weight is None:
+            raise HTTPException(status_code=400, detail="Lift goals require exercise_name and target_weight")
+
+    goal = models.StrengthGoal(
+        athlete_id=current_athlete.id,
+        goal_type=data.goal_type,
+        exercise_name=data.exercise_name,
+        starting_weight=data.starting_weight,
+        target_weight=data.target_weight,
+        qualitative_goal=data.qualitative_goal,
+        target_date=datetime.fromisoformat(data.target_date) if data.target_date else None
+    )
+    db.add(goal)
+    db.commit()
+    db.refresh(goal)
+    return goal
+
+
+@router.put("/goals/{goal_id}", response_model=StrengthGoalResponse)
+def update_goal(
+    goal_id: int,
+    data: StrengthGoalUpdate,
+    current_athlete: models.User = Depends(get_current_athlete),
+    db: Session = Depends(get_db)
+):
+    goal = db.query(models.StrengthGoal).filter(
+        and_(
+            models.StrengthGoal.id == goal_id,
+            models.StrengthGoal.athlete_id == current_athlete.id
+        )
+    ).first()
+    if not goal:
+        raise HTTPException(status_code=404, detail="Goal not found")
+
+    if data.exercise_name is not None:
+        goal.exercise_name = data.exercise_name
+    if data.starting_weight is not None:
+        goal.starting_weight = data.starting_weight
+    if data.target_weight is not None:
+        goal.target_weight = data.target_weight
+    if data.qualitative_goal is not None:
+        goal.qualitative_goal = data.qualitative_goal
+    if data.target_date is not None:
+        goal.target_date = datetime.fromisoformat(data.target_date)
+    if data.is_completed is not None:
+        goal.is_completed = data.is_completed
+
+    db.commit()
+    db.refresh(goal)
+    return goal
+
+
+@router.delete("/goals/{goal_id}")
+def delete_goal(
+    goal_id: int,
+    current_athlete: models.User = Depends(get_current_athlete),
+    db: Session = Depends(get_db)
+):
+    goal = db.query(models.StrengthGoal).filter(
+        and_(
+            models.StrengthGoal.id == goal_id,
+            models.StrengthGoal.athlete_id == current_athlete.id
+        )
+    ).first()
+    if not goal:
+        raise HTTPException(status_code=404, detail="Goal not found")
+
+    db.delete(goal)
+    db.commit()
+    return {"message": "Goal deleted"}
+
+
+@router.post("/goals/{goal_id}/complete")
+def complete_goal(
+    goal_id: int,
+    current_athlete: models.User = Depends(get_current_athlete),
+    db: Session = Depends(get_db)
+):
+    goal = db.query(models.StrengthGoal).filter(
+        and_(
+            models.StrengthGoal.id == goal_id,
+            models.StrengthGoal.athlete_id == current_athlete.id
+        )
+    ).first()
+    if not goal:
+        raise HTTPException(status_code=404, detail="Goal not found")
+
+    goal.is_completed = True
+    db.commit()
+    return {"message": "Goal marked as completed"}
+
+
+# ─── Join Coach ───────────────────────────────────────────────────────────────
+
+@router.post("/join-coach")
+def join_coach(
+    data: JoinCoachRequest,
+    current_athlete: models.User = Depends(get_current_athlete),
+    db: Session = Depends(get_db)
+):
+    coach = db.query(models.User).filter(
+        models.User.invite_code == data.invite_code.upper()
+    ).first()
+
+    if not coach:
+        raise HTTPException(status_code=400, detail="Invalid invite code")
+
+    if current_athlete in coach.coached_athletes:
+        raise HTTPException(status_code=409, detail="Already connected to this coach")
+
+    coach.coached_athletes.append(current_athlete)
+    db.commit()
+
+    return {"message": f"Connected to coach {coach.name}", "coach_name": coach.name, "coach_id": coach.id}
+
+
+# ─── Calendar ─────────────────────────────────────────────────────────────────
 
 @router.get("/calendar", response_model=list[CalendarWorkout])
 def get_calendar(
@@ -418,11 +603,15 @@ def get_calendar(
             scheduled_date=workout.scheduled_date,
             is_completed=workout_log.is_completed if workout_log else False,
             is_flagged=workout_log.is_flagged if workout_log else False,
+            rpe=workout_log.rpe if workout_log else None,
+            description=workout.description,
             exercises=exercises
         ))
 
     return calendar_workouts
 
+
+# ─── Workouts ─────────────────────────────────────────────────────────────────
 
 @router.get("/workouts/today", response_model=WorkoutResponse)
 def get_today_workout(
@@ -469,6 +658,89 @@ def get_workout(
     return _build_workout_response(workout, current_athlete, db)
 
 
+@router.post("/workouts", response_model=WorkoutResponse)
+def create_workout(
+    data: CreateWorkoutRequest,
+    current_athlete: models.User = Depends(get_current_athlete),
+    db: Session = Depends(get_db)
+):
+    """Create a self-programmed workout on a specific date."""
+    scheduled = datetime.fromisoformat(data.scheduled_date)
+
+    workout = models.Workout(
+        athlete_id=current_athlete.id,
+        name=data.name,
+        description=data.description,
+        scheduled_date=scheduled
+    )
+    db.add(workout)
+    db.flush()
+
+    for order, ex_data in enumerate(data.exercises, 1):
+        db.add(models.Exercise(
+            workout_id=workout.id,
+            name=ex_data.get("name", "Exercise"),
+            sets=ex_data.get("sets", 3),
+            reps=ex_data.get("reps", 10),
+            percentage_of_max=ex_data.get("percentage_of_max"),
+            target_exercise=ex_data.get("target_exercise"),
+            coach_notes=ex_data.get("coach_notes"),
+            order=ex_data.get("order", order)
+        ))
+
+    db.commit()
+    db.refresh(workout)
+    return _build_workout_response(workout, current_athlete, db)
+
+
+@router.post("/workouts/{workout_id}/copy", response_model=WorkoutResponse)
+def copy_workout(
+    workout_id: int,
+    data: CopyWorkoutRequest,
+    current_athlete: models.User = Depends(get_current_athlete),
+    db: Session = Depends(get_db)
+):
+    """Deep-copy a previous workout to a new date."""
+    source = db.query(models.Workout).filter(
+        and_(
+            models.Workout.id == workout_id,
+            models.Workout.athlete_id == current_athlete.id
+        )
+    ).first()
+
+    if not source:
+        raise HTTPException(status_code=404, detail="Workout not found")
+
+    scheduled = datetime.fromisoformat(data.scheduled_date)
+
+    new_workout = models.Workout(
+        athlete_id=current_athlete.id,
+        program_id=source.program_id,
+        name=source.name,
+        description=source.description,
+        scheduled_date=scheduled
+    )
+    db.add(new_workout)
+    db.flush()
+
+    for ex in sorted(source.exercises, key=lambda e: e.order):
+        db.add(models.Exercise(
+            workout_id=new_workout.id,
+            name=ex.name,
+            sets=ex.sets,
+            reps=ex.reps,
+            percentage_of_max=ex.percentage_of_max,
+            target_exercise=ex.target_exercise,
+            video_url=ex.video_url,
+            coach_notes=ex.coach_notes,
+            order=ex.order
+        ))
+
+    db.commit()
+    db.refresh(new_workout)
+    return _build_workout_response(new_workout, current_athlete, db)
+
+
 @router.put("/workouts/{workout_id}", response_model=WorkoutResponse)
 def edit_workout(
     workout_id: int,
@@ -490,7 +762,6 @@ def edit_workout(
         workout.name = data.name
 
     if data.exercises is not None:
-        # Remove existing exercises and replace
         for ex in workout.exercises:
             db.delete(ex)
         db.flush()
@@ -507,7 +778,6 @@ def edit_workout(
                 order=ex_data.order
             ))
 
-    # Mark as athlete-modified (so coach can see the change)
     workout.athlete_modified = True
     workout.modification_notes = data.modification_notes
 
@@ -622,6 +892,8 @@ def complete_workout(
     workout_log.completed_at = datetime.utcnow()
     if data.notes:
         workout_log.notes = data.notes
+    if data.rpe is not None:
+        workout_log.rpe = data.rpe
 
     db.commit()
     return {"message": "Workout completed successfully"}
@@ -658,6 +930,8 @@ def flag_workout(
     return {"message": "Workout flagged successfully"}
 
 
+# ─── History & Progress ───────────────────────────────────────────────────────
+
 @router.get("/history", response_model=list[WorkoutLogResponse])
 def get_history(
     limit: int = 50,
@@ -680,7 +954,8 @@ def get_history(
             is_completed=log.is_completed,
             has_modifications=log.has_modifications,
             is_flagged=log.is_flagged,
-            flag_reason=log.flag_reason
+            flag_reason=log.flag_reason,
+            rpe=log.rpe
         ))
 
     return response
@@ -714,15 +989,15 @@ def get_progress(
         )
         current_maxes[max_record.exercise_name] = max_record.max_weight
 
-    # Fetch strength goals
+    # Fetch strength goals (lift-type only for progress view)
     goals_query = db.query(models.StrengthGoal).filter(
-        models.StrengthGoal.athlete_id == current_athlete.id
+        models.StrengthGoal.athlete_id == current_athlete.id,
+        models.StrengthGoal.goal_type == "lift"
     )
     if exercise_name:
         goals_query = goals_query.filter(models.StrengthGoal.exercise_name == exercise_name)
     goals = {g.exercise_name: g for g in goals_query.all()}
 
-    # Combine exercises from both maxes and goals
     all_exercises = set(progress_by_exercise.keys()) | set(goals.keys())
 
     return [
@@ -732,16 +1007,65 @@ def get_progress(
             data=progress_by_exercise.get(exercise, []),
             goal=StrengthGoalResponse(
                 id=goals[exercise].id,
+                goal_type=goals[exercise].goal_type,
                 exercise_name=goals[exercise].exercise_name,
                 starting_weight=goals[exercise].starting_weight,
                 target_weight=goals[exercise].target_weight,
+                qualitative_goal=goals[exercise].qualitative_goal,
                 target_date=goals[exercise].target_date,
+                is_completed=goals[exercise].is_completed,
                 created_at=goals[exercise].created_at
             ) if exercise in goals else None
         )
         for exercise in sorted(all_exercises)
     ]
 
+
+# ─── Generate Program ─────────────────────────────────────────────────────────
+
+@router.post("/generate-program")
+def generate_program(
+    data: GenerateProgramRequest,
+    current_athlete: models.User = Depends(get_current_athlete),
+    db: Session = Depends(get_db)
+):
+    """Auto-generate a multi-week training program based on athlete profile."""
+    # Determine number of weeks
+    if data.weeks:
+        weeks = data.weeks
+    elif data.target_date:
+        target = datetime.fromisoformat(data.target_date).date()
+        days_until = (target - datetime.utcnow().date()).days
+        weeks = max(1, days_until // 7)
+    else:
+        weeks = 4  # Default 4-week program
+
+    weeks = min(weeks, 16)  # Cap at 16 weeks
+
+    # Build an OnboardingRequest-like object from athlete's current profile
+    onboarding_data = OnboardingRequest(
+        training_goals=current_athlete.training_goals,
+        injuries=current_athlete.injuries,
+        experience_level=current_athlete.experience_level,
+        has_coach=False
+    )
+
+    # If specific goals provided, override training_goals
+    if data.goals:
+        onboarding_data.training_goals = " ".join(data.goals)
+
+    program = _generate_starter_program(current_athlete, onboarding_data, db, weeks=weeks)
+    db.commit()
+
+    return {
+        "message": f"Program generated: {program.name} ({weeks} weeks)",
+        "program_id": program.id,
+        "program_name": program.name,
+        "weeks": weeks
+    }
+
+
+# ─── Profile ──────────────────────────────────────────────────────────────────
 
 @router.put("/profile")
 def update_profile(
@@ -808,9 +1132,8 @@ def upload_profile_photo(
     if not file.content_type or not file.content_type.startswith("image/"):
         raise HTTPException(status_code=400, detail="File must be an image")
 
-    # Read and store as base64 data URL (simple approach for MVP)
     contents = file.file.read()
-    if len(contents) > 5 * 1024 * 1024:  # 5MB limit
+    if len(contents) > 5 * 1024 * 1024:
         raise HTTPException(status_code=400, detail="Image too large (max 5MB)")
 
     b64 = base64.b64encode(contents).decode("utf-8")
