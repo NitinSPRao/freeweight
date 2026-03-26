@@ -766,6 +766,39 @@ def update_profile(
     return {"message": "Profile updated successfully"}
 
 
+@router.put("/coach")
+def change_coach(
+    data: dict,
+    current_athlete: models.User = Depends(get_current_athlete),
+    db: Session = Depends(get_db)
+):
+    invite_code = data.get("invite_code", "").upper()
+    if not invite_code:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="invite_code is required")
+
+    coach = db.query(models.User).filter(models.User.invite_code == invite_code).first()
+    if not coach:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid invite code")
+
+    coach.coached_athletes.append(current_athlete)
+    db.commit()
+    db.refresh(current_athlete)
+
+    return {
+        "id": current_athlete.id,
+        "email": current_athlete.email,
+        "name": current_athlete.name,
+        "user_type": current_athlete.user_type.value.lower(),
+        "sport": current_athlete.sport,
+        "team": current_athlete.team,
+        "training_goals": current_athlete.training_goals,
+        "injuries": current_athlete.injuries,
+        "experience_level": current_athlete.experience_level,
+        "onboarding_completed": current_athlete.onboarding_completed or False,
+        "profile_photo_url": current_athlete.profile_photo_url,
+    }
+
+
 @router.post("/profile/photo")
 def upload_profile_photo(
     file: UploadFile = File(...),
