@@ -1,16 +1,46 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useState, useEffect } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { authApi, saveAuthData } from "@/lib/auth";
 
 export default function LoginPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
+
+  // Check for auth data passed from landing page via URL params
+  useEffect(() => {
+    const token = searchParams.get("token");
+    const userStr = searchParams.get("user");
+
+    if (token && userStr) {
+      try {
+        const user = JSON.parse(userStr);
+        saveAuthData(token, user);
+
+        // Redirect based on user type and onboarding status
+        if (user.user_type === "coach") {
+          if (!user.onboarding_completed) {
+            router.push("/coach/onboarding");
+          } else {
+            router.push("/coach/dashboard");
+          }
+        } else if (!user.onboarding_completed) {
+          router.push("/athlete/onboarding");
+        } else {
+          router.push("/athlete/home");
+        }
+      } catch (err) {
+        console.error("Failed to parse auth data from URL:", err);
+        setError("Invalid authentication data. Please try logging in again.");
+      }
+    }
+  }, [searchParams, router]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
