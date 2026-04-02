@@ -243,3 +243,20 @@ class ExerciseCatalog(Base):
     is_custom = Column(Boolean, default=False)
     created_by = Column(Integer, ForeignKey("users.id"), nullable=True)  # null for predefined
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+class Waitlist(Base):
+    __tablename__ = "waitlist"
+
+    id = Column(Integer, primary_key=True, index=True)
+    email = Column(String, unique=True, index=True, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+class PageView(Base):
+    __tablename__ = "page_views"
+
+    id = Column(Integer, primary_key=True, index=True)
+    page_path = Column(String, nullable=False)  # e.g., "/", "/pricing", "/login"
+    user_agent = Column(String, nullable=True)
+    ip_address = Column(String, nullable=True)
+    referrer = Column(String, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now(), index=True)
