@@ -186,6 +186,7 @@ class Exercise(Base):
     target_exercise = Column(String, nullable=True)  # Which max to use: "squat", "deadlift", etc.
     video_url = Column(String, nullable=True)
     coach_notes = Column(Text, nullable=True)
+    rest_seconds = Column(Integer, nullable=True)  # Rest time between sets in seconds (default: 90)
     order = Column(Integer, nullable=False)  # Order within workout
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 

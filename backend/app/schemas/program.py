@@ -10,6 +10,7 @@ class ExerciseCreate(BaseModel):
     target_exercise: Optional[str] = None
     video_url: Optional[str] = None
     coach_notes: Optional[str] = None
+    rest_seconds: Optional[int] = None  # Rest time between sets (default: 90)
     order: int
 
 class ExerciseResponse(BaseModel):
@@ -21,6 +22,7 @@ class ExerciseResponse(BaseModel):
     target_exercise: Optional[str] = None
     video_url: Optional[str] = None
     coach_notes: Optional[str] = None
+    rest_seconds: Optional[int] = None
     order: int
 
     class Config:

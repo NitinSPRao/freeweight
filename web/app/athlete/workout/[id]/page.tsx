@@ -5,6 +5,7 @@ import { useRouter, useParams } from "next/navigation";
 import { useState, useCallback } from "react";
 import AuthGuard from "@/components/AuthGuard";
 import NavBar from "@/components/NavBar";
+import RestTimer from "@/components/RestTimer";
 import { athleteApi, Exercise } from "@/lib/api-endpoints";
 import { getAuthData } from "@/lib/auth";
 import { calculateTargetWeight } from "@/lib/utils";
@@ -34,6 +35,8 @@ export default function WorkoutPage() {
   const [completionNotes, setCompletionNotes] = useState("");
   const [showCompletionModal, setShowCompletionModal] = useState(false);
   const [workoutStarted, setWorkoutStarted] = useState(false);
+  const [showRestTimer, setShowRestTimer] = useState(false);
+  const [restDuration, setRestDuration] = useState(90);
 
   const { data: workout, isLoading } = useQuery({
     queryKey: ["workout", workoutId],
@@ -130,21 +133,42 @@ export default function WorkoutPage() {
     setLoggedSets((prev) => ({ ...prev, [key]: entry }));
     logSetMutation.mutate(entry);
 
-    // Auto-advance
-    if (currentSetIndex + 1 < currentExercise.sets) {
-      setCurrentSetIndex(currentSetIndex + 1);
-      setShowCustomInput(false);
-    } else if (currentExerciseIndex + 1 < totalExercises) {
-      setCurrentExerciseIndex(currentExerciseIndex + 1);
-      setCurrentSetIndex(0);
-      setShowCustomInput(false);
+    // Check if we should show rest timer (not last set of exercise)
+    const isLastSetOfExercise = currentSetIndex + 1 >= currentExercise.sets;
+
+    if (!isLastSetOfExercise) {
+      // Show rest timer with coach-prescribed duration or default 90s
+      const duration = currentExercise.rest_seconds || 90;
+      setRestDuration(duration);
+      setShowRestTimer(true);
     } else {
-      setShowCompletionModal(true);
+      // Auto-advance without timer
+      if (currentExerciseIndex + 1 < totalExercises) {
+        setCurrentExerciseIndex(currentExerciseIndex + 1);
+        setCurrentSetIndex(0);
+        setShowCustomInput(false);
+      } else {
+        setShowCompletionModal(true);
+      }
     }
   };
 
   const handleCompletedAsPlanned = () => {
     logCurrentSet(targetWeight || 0, prescribedReps, false);
+  };
+
+  const handleRestComplete = () => {
+    setShowRestTimer(false);
+    // Auto-advance to next set
+    setCurrentSetIndex(currentSetIndex + 1);
+    setShowCustomInput(false);
+  };
+
+  const handleSkipRest = () => {
+    setShowRestTimer(false);
+    // Auto-advance to next set
+    setCurrentSetIndex(currentSetIndex + 1);
+    setShowCustomInput(false);
   };
 
   // ─── Loading / Error ──────────────────────────────────────────────────────
@@ -460,6 +484,16 @@ export default function WorkoutPage() {
               </div>
             </div>
           </div>
+        )}
+
+        {/* Rest Timer */}
+        {showRestTimer && currentExercise && (
+          <RestTimer
+            durationSeconds={restDuration}
+            nextSetInfo={`Set ${currentSetIndex + 2}/${currentExercise.sets}`}
+            onComplete={handleRestComplete}
+            onSkip={handleSkipRest}
+          />
         )}
       </div>
     </AuthGuard>

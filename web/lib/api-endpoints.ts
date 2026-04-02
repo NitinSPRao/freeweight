@@ -22,6 +22,7 @@ export interface Exercise {
   target_exercise?: string;
   video_url?: string;
   coach_notes?: string;
+  rest_seconds?: number;
   order: number;
 }
 

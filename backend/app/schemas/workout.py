@@ -12,6 +12,7 @@ class ExerciseResponse(BaseModel):
     target_weight: Optional[float] = None
     video_url: Optional[str] = None
     coach_notes: Optional[str] = None
+    rest_seconds: Optional[int] = None
     order: int
 
     class Config:
@@ -41,6 +42,7 @@ class ExerciseUpdate(BaseModel):
     percentage_of_max: Optional[float] = None
     target_exercise: Optional[str] = None
     coach_notes: Optional[str] = None
+    rest_seconds: Optional[int] = None
     order: int
 
 
