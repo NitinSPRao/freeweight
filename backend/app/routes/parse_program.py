@@ -63,6 +63,10 @@ HANDLING ANY FORMAT:
 - If reps are freeform, set reps to 1 and store full description
   in coach_notes
 - Never hallucinate exercises. Only include what is in the spreadsheet.
+- Rest times are especially important in rehab and PT programs.
+  Always capture rest_seconds when stated. Convert to seconds:
+  "30s" → 30, "1 min" or "1m" → 60, "90s" → 90,
+  "No rest" or "none" → 0. If not stated, use null.
 - Return ONLY valid JSON. No markdown, no backticks, no preamble.
   First character must be '{'.
 """
@@ -75,6 +79,16 @@ def _cell_to_str(val) -> str:
     if "Formula" in type(val).__name__:
         return ""
     return str(val).strip()
+
+
+def _read_pdf(contents: bytes) -> str:
+    import fitz
+    doc = fitz.open(stream=contents, filetype="pdf")
+    sections = []
+    for page_num, page in enumerate(doc):
+        sections.append(f"=== Page {page_num + 1} ===")
+        sections.append(page.get_text())
+    return "\n".join(sections)
 
 
 def _read_xlsx(contents: bytes) -> str:
@@ -105,16 +119,16 @@ async def parse_program(
     filename = file.filename or ""
     ext = ("." + filename.rsplit(".", 1)[-1].lower()) if "." in filename else ""
 
-    if ext != ".xlsx":
+    if ext not in (".xlsx", ".pdf"):
         raise HTTPException(
             status_code=422,
-            detail=f"Unsupported file type '{ext or 'unknown'}'. Please upload a .xlsx file.",
+            detail=f"Unsupported file type '{ext or 'unknown'}'. Please upload a .xlsx or .pdf file.",
         )
 
     contents = await file.read()
 
     try:
-        spreadsheet_text = _read_xlsx(contents)
+        spreadsheet_text = _read_pdf(contents) if ext == ".pdf" else _read_xlsx(contents)
     except Exception as exc:
         raise HTTPException(status_code=422, detail=f"Could not read file: {exc}")
 

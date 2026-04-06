@@ -47,6 +47,8 @@ class WorkoutResponse(BaseModel):
 class ProgramCreate(BaseModel):
     name: str
     description: Optional[str] = None
+    program_type: Optional[str] = "strength"
+    body_regions: Optional[List[str]] = None
 
 class ProgramResponse(BaseModel):
     id: int
@@ -55,6 +57,8 @@ class ProgramResponse(BaseModel):
     created_at: datetime
     workouts: List[WorkoutResponse]
     workout_count: int = 0
+    program_type: str = "strength"
+    body_regions: Optional[List[str]] = None
 
     class Config:
         from_attributes = True

@@ -68,6 +68,8 @@ class WorkoutComplete(BaseModel):
 
 class FlagRequest(BaseModel):
     reason: str
+    body_region: Optional[str] = None
+    body_region_detail: Optional[str] = None
 
 class WorkoutLogResponse(BaseModel):
     id: int

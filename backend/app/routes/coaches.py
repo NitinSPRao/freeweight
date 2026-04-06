@@ -4,9 +4,10 @@ from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 from pydantic import BaseModel
 import json
+import logging
 from ..database import get_db
 from ..auth import get_current_coach
-from ..models import User, Group, Subgroup, WorkoutLog, AthleteMax, Workout, ProgramAssignment, group_members, Program, Exercise
+from ..models import User, Group, Subgroup, WorkoutLog, AthleteMax, Workout, ProgramAssignment, group_members, Program, Exercise, Notification
 from ..schemas.coach import (
     DashboardResponse,
     RosterResponse,
@@ -19,7 +20,10 @@ from ..schemas.coach import (
     SubgroupBasic
 )
 from ..schemas.group import GroupCreate, SubgroupCreate
+from ..schemas.notifications import NotificationResponse
 from ..config import settings
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/coaches", tags=["coaches"])
 
@@ -53,12 +57,18 @@ def get_dashboard(
             ))
             seen_athlete_ids.add(log.athlete_id)
 
+    unread_notifications = db.query(Notification).filter(
+        Notification.coach_id == current_coach.id,
+        Notification.is_read == False
+    ).count()
+
     return DashboardResponse(
         completed_today=completed_today,
         completed_workouts_today=completed_today,  # Backwards compatibility
         flagged_workouts=len(flagged_athletes),
         flagged_athletes=flagged_athletes,
-        total_athletes=len(current_coach.coached_athletes)
+        total_athletes=len(current_coach.coached_athletes),
+        unread_notifications=unread_notifications,
     )
 
 @router.get("/roster", response_model=RosterResponse)
@@ -428,6 +438,101 @@ def acknowledge_workout_log(
     return {"message": "Workout log acknowledged"}
 
 
+# ─── Notifications ────────────────────────────────────────────────────────────
+
+@router.get("/notifications", response_model=List[NotificationResponse])
+def get_notifications(
+    current_coach: User = Depends(get_current_coach),
+    db: Session = Depends(get_db)
+):
+    """Return all notifications for the current coach, newest first."""
+    notifications = db.query(Notification).filter(
+        Notification.coach_id == current_coach.id
+    ).order_by(Notification.created_at.desc()).all()
+
+    result = []
+    for n in notifications:
+        athlete = db.query(User).filter(User.id == n.athlete_id).first()
+        program_name = None
+        if n.program_id:
+            program = db.query(Program).filter(Program.id == n.program_id).first()
+            program_name = program.name if program else None
+
+        body_region = None
+        body_region_detail = None
+        if n.workout_log_id:
+            log = db.query(WorkoutLog).filter(WorkoutLog.id == n.workout_log_id).first()
+            if log:
+                body_region = log.body_region
+                body_region_detail = log.body_region_detail
+
+        result.append(NotificationResponse(
+            id=n.id,
+            athlete_id=n.athlete_id,
+            athlete_name=athlete.name if athlete else "Unknown",
+            workout_log_id=n.workout_log_id,
+            program_id=n.program_id,
+            program_name=program_name,
+            message=n.message,
+            notification_type=n.notification_type,
+            is_read=n.is_read,
+            created_at=n.created_at,
+            body_region=body_region,
+            body_region_detail=body_region_detail,
+        ))
+
+    return result
+
+
+@router.get("/notifications/unread-count")
+def get_unread_notification_count(
+    current_coach: User = Depends(get_current_coach),
+    db: Session = Depends(get_db)
+):
+    """Return count of unread notifications for the current coach."""
+    count = db.query(Notification).filter(
+        Notification.coach_id == current_coach.id,
+        Notification.is_read == False
+    ).count()
+    return {"count": count}
+
+
+@router.patch("/notifications/read-all")
+def mark_all_notifications_read(
+    current_coach: User = Depends(get_current_coach),
+    db: Session = Depends(get_db)
+):
+    """Mark all notifications for the current coach as read."""
+    updated = db.query(Notification).filter(
+        Notification.coach_id == current_coach.id,
+        Notification.is_read == False
+    ).all()
+    for n in updated:
+        n.is_read = True
+    db.commit()
+    return {"count": len(updated)}
+
+
+@router.patch("/notifications/{notification_id}/read")
+def mark_notification_read(
+    notification_id: int,
+    current_coach: User = Depends(get_current_coach),
+    db: Session = Depends(get_db)
+):
+    """Mark a single notification as read."""
+    notification = db.query(Notification).filter(
+        Notification.id == notification_id
+    ).first()
+    if not notification:
+        raise HTTPException(status_code=404, detail="Notification not found")
+    if notification.coach_id != current_coach.id:
+        raise HTTPException(status_code=403, detail="Not authorized")
+
+    notification.is_read = True
+    db.commit()
+    return {"message": "Notification marked as read"}
+
+
 # ─── Program Import (from AI parse) ───────────────────────────────────────────
 
 class ImportExercise(BaseModel):
@@ -450,6 +555,7 @@ class ImportProgramRequest(BaseModel):
     program_name: str
     description: Optional[str] = None
     workouts: List[ImportWorkout]
+    program_type: Optional[str] = "strength"
 
 
 @router.post("/programs/import")
@@ -463,6 +569,7 @@ def import_program(
         name=data.program_name,
         description=data.description,
         coach_id=current_coach.id,
+        program_type=data.program_type or "strength",
     )
     db.add(program)
     db.flush()  # get program.id before creating workouts

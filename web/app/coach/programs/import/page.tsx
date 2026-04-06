@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import AuthGuard from "@/components/AuthGuard";
 import NavBar from "@/components/NavBar";
@@ -29,6 +29,8 @@ function Spinner() {
 export default function ImportProgramPage() {
   const { user } = getAuthData();
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const programType = searchParams.get("type") === "rehab" ? "rehab" : "strength";
 
   // Keep the original File for the entire session so it can be re-sent on retry
   const fileRef = useRef<File | null>(null);
@@ -141,6 +143,7 @@ export default function ImportProgramPage() {
         ...current,
         program_name: programName,
         description: programDesc || null,
+        program_type: programType,
       });
       router.push("/coach/programs");
     } catch (err: any) {
@@ -263,7 +266,7 @@ export default function ImportProgramPage() {
                       Click to choose a file
                     </p>
                     <p className="text-secondary text-sm mt-1">
-                      Accepts .xlsx files only
+                      Accepts .xlsx and .pdf files
                     </p>
                   </>
                 )}
@@ -271,7 +274,7 @@ export default function ImportProgramPage() {
               <input
                 id="file-input"
                 type="file"
-                accept=".xlsx"
+                accept=".xlsx,.pdf"
                 className="hidden"
                 onChange={handleFileChange}
               />

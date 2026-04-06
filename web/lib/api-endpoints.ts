@@ -24,6 +24,7 @@ export interface ParsedProgram {
   program_name: string;
   description: string | null;
   workouts: ParsedWorkout[];
+  program_type?: string;
 }
 
 export interface AthleteMax {
@@ -69,6 +70,23 @@ export interface Program {
   updated_at?: string;
   archived?: boolean;
   workouts: Workout[];
+  program_type: string;   // "strength" or "rehab"
+  body_regions: string[] | null;
+}
+
+export interface Notification {
+  id: number;
+  athlete_id: number;
+  athlete_name: string;
+  workout_log_id: number | null;
+  program_id: number | null;
+  program_name: string | null;
+  message: string;
+  notification_type: "rehab_assigned" | "injury_no_rehab";
+  is_read: boolean;
+  created_at: string;
+  body_region: string | null;
+  body_region_detail: string | null;
 }
 
 export interface WorkoutLog {
@@ -383,6 +401,26 @@ export const coachApi = {
     return response.data;
   },
 
+  getNotifications: async () => {
+    const response = await apiClient.get<Notification[]>("/api/coaches/notifications");
+    return response.data;
+  },
+
+  getUnreadNotificationCount: async () => {
+    const response = await apiClient.get<{ count: number }>("/api/coaches/notifications/unread-count");
+    return response.data;
+  },
+
+  markNotificationRead: async (id: number) => {
+    const response = await apiClient.patch(`/api/coaches/notifications/${id}/read`);
+    return response.data;
+  },
+
+  markAllNotificationsRead: async () => {
+    const response = await apiClient.patch("/api/coaches/notifications/read-all");
+    return response.data;
+  },
+
   // Subgroup Management
   createSubgroup: async (groupId: number, name: string, training_focus?: string) => {
     const response = await apiClient.post(`/api/coaches/groups/${groupId}/subgroups`, {
@@ -439,7 +477,7 @@ export const programApi = {
     return response.data;
   },
 
-  create: async (data: { name: string; description?: string }) => {
+  create: async (data: { name: string; description?: string; program_type?: string; body_regions?: string[] | null }) => {
     const response = await apiClient.post<Program>("/api/programs", data);
     return response.data;
   },

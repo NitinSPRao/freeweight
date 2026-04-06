@@ -26,6 +26,7 @@ class DashboardResponse(BaseModel):
     flagged_workouts: int
     flagged_athletes: List[FlaggedAthlete]
     total_athletes: int
+    unread_notifications: int = 0
 
 class GroupBasic(BaseModel):
     id: int

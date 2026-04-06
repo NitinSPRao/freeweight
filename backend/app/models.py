@@ -1,8 +1,37 @@
 from sqlalchemy import Column, Integer, String, Float, Boolean, DateTime, ForeignKey, Table, Enum, Text
+from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from .database import Base
 import enum
+
+# ─── Body Region Constants ────────────────────────────────────────────────────
+# Single source of truth for all body region values used across the injury/rehab
+# feature. Import these in routes and schemas — do not hardcode elsewhere.
+
+BODY_REGIONS = [
+    "neck_upper_back",
+    "shoulder",
+    "elbow_wrist",
+    "core_ribs",
+    "lower_back",
+    "hip",
+    "knee",
+    "lower_leg_shin",
+    "ankle_foot",
+]
+
+BODY_REGION_LABELS = {
+    "neck_upper_back": "Neck & Upper Back",
+    "shoulder": "Shoulder",
+    "elbow_wrist": "Elbow & Wrist",
+    "core_ribs": "Core & Ribs",
+    "lower_back": "Lower Back",
+    "hip": "Hip",
+    "knee": "Knee",
+    "lower_leg_shin": "Lower Leg & Shin",
+    "ankle_foot": "Ankle & Foot",
+}
 
 class UserType(enum.Enum):
     ATHLETE = "athlete"
@@ -135,6 +164,8 @@ class Program(Base):
     name = Column(String, nullable=False)
     description = Column(Text, nullable=True)
     archived = Column(Boolean, default=False, nullable=False)
+    program_type = Column(String, nullable=False, server_default="strength")  # "strength" or "rehab"
+    body_regions = Column(ARRAY(String), nullable=True)  # Only set when program_type == "rehab"
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
@@ -207,6 +238,8 @@ class WorkoutLog(Base):
     rpe = Column(Integer, nullable=True)  # Session-level Rate of Perceived Exertion (1-10)
     is_flagged = Column(Boolean, default=False)
     flag_reason = Column(Text, nullable=True)
+    body_region = Column(String, nullable=True)      # One of BODY_REGIONS; set when flagged with injury
+    body_region_detail = Column(Text, nullable=True) # Free-text specificity, e.g. "IT band", "ACL"
     coach_acknowledged = Column(Boolean, default=False)
     coach_response = Column(Text, nullable=True)
     acknowledged_at = Column(DateTime(timezone=True), nullable=True)
@@ -233,6 +266,25 @@ class SetLog(Base):
 
     workout_log = relationship("WorkoutLog", back_populates="set_logs")
     exercise = relationship("Exercise", back_populates="set_logs")
+
+class Notification(Base):
+    __tablename__ = "notifications"
+
+    id = Column(Integer, primary_key=True, index=True)
+    coach_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    athlete_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    workout_log_id = Column(Integer, ForeignKey("workout_logs.id"), nullable=True)
+    program_id = Column(Integer, ForeignKey("programs.id"), nullable=True)
+    message = Column(Text, nullable=False)
+    notification_type = Column(String, nullable=False)  # "rehab_assigned" or "injury_no_rehab"
+    is_read = Column(Boolean, default=False, nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    coach = relationship("User", foreign_keys=[coach_id])
+    athlete = relationship("User", foreign_keys=[athlete_id])
+    workout_log = relationship("WorkoutLog")
+    program = relationship("Program")
+
 
 class ExerciseCatalog(Base):
     __tablename__ = "exercise_catalog"

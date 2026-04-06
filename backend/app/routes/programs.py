@@ -54,7 +54,9 @@ def _serialize_program(program: Program, include_workouts: bool = True) -> Progr
         description=program.description,
         created_at=program.created_at,
         workouts=workouts,
-        workout_count=template_count
+        workout_count=template_count,
+        program_type=program.program_type or "strength",
+        body_regions=program.body_regions,
     )
 
 
@@ -93,7 +95,9 @@ def create_program(
     new_program = Program(
         coach_id=current_coach.id,
         name=program_data.name,
-        description=program_data.description
+        description=program_data.description,
+        program_type=program_data.program_type or "strength",
+        body_regions=program_data.body_regions,
     )
     db.add(new_program)
     db.commit()
@@ -104,7 +108,9 @@ def create_program(
         name=new_program.name,
         description=new_program.description,
         created_at=new_program.created_at,
-        workouts=[]
+        workouts=[],
+        program_type=new_program.program_type,
+        body_regions=new_program.body_regions,
     )
 
 

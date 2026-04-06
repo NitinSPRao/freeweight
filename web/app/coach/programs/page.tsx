@@ -10,12 +10,26 @@ import { programApi } from "@/lib/api-endpoints";
 import { getAuthData } from "@/lib/auth";
 import { formatDate } from "@/lib/utils";
 
+const BODY_REGION_LABELS: Record<string, string> = {
+  neck_upper_back: "Neck & Upper Back",
+  shoulder: "Shoulder",
+  elbow_wrist: "Elbow & Wrist",
+  core_ribs: "Core & Ribs",
+  lower_back: "Lower Back",
+  hip: "Hip",
+  knee: "Knee",
+  lower_leg_shin: "Lower Leg & Shin",
+  ankle_foot: "Ankle & Foot",
+};
+
 export default function CoachProgramsPage() {
   const { user } = getAuthData();
   const router = useRouter();
   const [showArchived, setShowArchived] = useState(false);
   const [openMenuId, setOpenMenuId] = useState<number | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
+  const [createMethod, setCreateMethod] = useState<"manual" | "import">("manual");
+  const [modalProgramType, setModalProgramType] = useState<"strength" | "rehab">("strength");
   const [actionLoading, setActionLoading] = useState<number | null>(null);
 
   const queryClient = useQueryClient();
@@ -139,7 +153,7 @@ export default function CoachProgramsPage() {
               {programs.map((program) => (
                 <div
                   key={program.id}
-                  className="card hover:border-primary/40 transition-colors relative flex flex-col"
+                  className={`card hover:border-primary/40 transition-colors relative flex flex-col${program.program_type === "rehab" ? " border-l-4 border-l-amber-400" : ""}`}
                 >
                   {/* Three-dot menu button */}
                   <div
@@ -201,6 +215,11 @@ export default function CoachProgramsPage() {
                       <h3 className="text-xl font-heading font-bold text-text">
                         {program.name}
                       </h3>
+                      {program.program_type === "rehab" && (
+                        <span className="shrink-0 text-xs bg-amber-400/20 text-amber-400 px-2 py-1 rounded mt-0.5">
+                          Rehab
+                        </span>
+                      )}
                       {program.archived && (
                         <span className="shrink-0 text-xs bg-secondary/20 text-secondary px-2 py-1 rounded mt-0.5">
                           Archived
@@ -212,6 +231,19 @@ export default function CoachProgramsPage() {
                       <p className="text-secondary text-sm mb-4 line-clamp-2">
                         {program.description}
                       </p>
+                    )}
+
+                    {program.program_type === "rehab" && program.body_regions && program.body_regions.length > 0 && (
+                      <div className="flex flex-wrap gap-1.5 mb-4">
+                        {program.body_regions.map((region) => (
+                          <span
+                            key={region}
+                            className="text-xs bg-amber-400/10 text-amber-400 border border-amber-400/30 px-2 py-0.5 rounded-full"
+                          >
+                            {BODY_REGION_LABELS[region] ?? region}
+                          </span>
+                        ))}
+                      </div>
                     )}
 
                     <div className="space-y-2 text-sm mb-4">
@@ -274,7 +306,7 @@ export default function CoachProgramsPage() {
               if (e.target === e.currentTarget) setModalOpen(false);
             }}
           >
-            <div className="bg-background border border-secondary/30 rounded-2xl shadow-2xl w-full max-w-lg p-8 relative">
+            <div className="bg-background border border-secondary/30 rounded-2xl shadow-2xl w-full max-w-[520px] p-8 relative">
               <button
                 onClick={() => setModalOpen(false)}
                 className="absolute top-4 right-4 w-8 h-8 flex items-center justify-center rounded-lg text-secondary hover:text-text hover:bg-secondary/10 transition-colors text-lg"
@@ -283,37 +315,72 @@ export default function CoachProgramsPage() {
                 ✕
               </button>
 
-              <h2 className="text-xl font-heading font-bold text-text mb-6">
-                How do you want to create a program?
-              </h2>
+              <h2 className="text-xl font-heading font-bold text-text mb-6">New Program</h2>
 
-              <div className="grid grid-cols-2 gap-4">
-                <button
-                  onClick={() => { setModalOpen(false); router.push("/coach/programs/create"); }}
-                  className="group border border-secondary/30 hover:border-primary rounded-xl p-5 text-left bg-background transition-colors"
-                >
-                  <div className="text-2xl mb-3">✏️</div>
-                  <p className="font-heading font-bold text-text text-sm mb-1 group-hover:text-primary transition-colors">
-                    Enter manually
-                  </p>
-                  <p className="text-secondary text-xs">
-                    Build your program workout by workout
-                  </p>
-                </button>
-
-                <button
-                  onClick={() => { setModalOpen(false); router.push("/coach/programs/import"); }}
-                  className="group border border-secondary/30 hover:border-primary rounded-xl p-5 text-left bg-background transition-colors"
-                >
-                  <div className="text-2xl mb-3">📊</div>
-                  <p className="font-heading font-bold text-text text-sm mb-1 group-hover:text-primary transition-colors">
-                    Import from spreadsheet
-                  </p>
-                  <p className="text-secondary text-xs">
-                    Upload an Excel file and AI will structure it
-                  </p>
-                </button>
+              {/* Toggle group 1 — creation method */}
+              <div className="mb-6">
+                <p className="text-xs font-medium text-secondary uppercase tracking-wider mb-3">
+                  How do you want to create it?
+                </p>
+                <div className="flex gap-2">
+                  {(["manual", "import"] as const).map((method) => {
+                    const label = method === "manual" ? "Enter manually" : "Import from spreadsheet";
+                    const selected = createMethod === method;
+                    return (
+                      <button
+                        key={method}
+                        onClick={() => setCreateMethod(method)}
+                        className={`flex-1 py-2.5 px-4 rounded-lg text-sm font-medium border transition-colors ${
+                          selected
+                            ? "bg-lime-400/10 border-lime-400 text-lime-400"
+                            : "bg-zinc-800/40 border-secondary/20 text-secondary hover:border-secondary/40"
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
+
+              {/* Toggle group 2 — program type */}
+              <div className="mb-8">
+                <p className="text-xs font-medium text-secondary uppercase tracking-wider mb-3">
+                  What type of program?
+                </p>
+                <div className="flex gap-2">
+                  {(["strength", "rehab"] as const).map((type) => {
+                    const label = type === "strength" ? "Strength Training" : "Rehab / PT";
+                    const selected = modalProgramType === type;
+                    return (
+                      <button
+                        key={type}
+                        onClick={() => setModalProgramType(type)}
+                        className={`flex-1 py-2.5 px-4 rounded-lg text-sm font-medium border transition-colors ${
+                          selected
+                            ? "bg-amber-400/10 border-amber-400 text-amber-400"
+                            : "bg-zinc-800/40 border-secondary/20 text-secondary hover:border-secondary/40"
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Confirm */}
+              <button
+                onClick={() => {
+                  setModalOpen(false);
+                  const base = createMethod === "manual" ? "/coach/programs/create" : "/coach/programs/import";
+                  const query = modalProgramType === "rehab" ? "?type=rehab" : "";
+                  router.push(`${base}${query}`);
+                }}
+                className="w-full btn-primary"
+              >
+                Continue
+              </button>
             </div>
           </div>
         )}

@@ -1,12 +1,15 @@
 from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
 from sqlalchemy.orm import Session
 from sqlalchemy import and_
-from datetime import datetime, date, timedelta
+from datetime import datetime, date, timedelta, timezone
 from typing import Optional
 import base64
+import logging
 from ..database import get_db
 from ..auth import get_current_athlete
 from .. import models
+
+logger = logging.getLogger(__name__)
 from ..schemas.athlete import (
     OnboardingRequest, MaxUpdate, CalendarWorkout, CalendarExerciseSummary,
     ProgressResponse, ProgressDataPoint, StrengthGoalResponse,
@@ -919,12 +922,91 @@ def flag_workout(
             workout_id=workout_id,
             is_completed=False,
             is_flagged=True,
-            flag_reason=data.reason
+            flag_reason=data.reason,
+            body_region=data.body_region,
+            body_region_detail=data.body_region_detail,
         )
         db.add(workout_log)
+        db.flush()  # get workout_log.id for notification FK before commit
     else:
         workout_log.is_flagged = True
         workout_log.flag_reason = data.reason
+        workout_log.body_region = data.body_region
+        workout_log.body_region_detail = data.body_region_detail
+
+    # ─── Notification & rehab assignment (side effect — must not block flag) ──
+    try:
+        coach = current_athlete.coaches[0] if current_athlete.coaches else None
+        if coach:
+            if data.body_region:
+                region_label = models.BODY_REGION_LABELS.get(data.body_region, data.body_region)
+
+                matching = db.query(models.Program).filter(
+                    models.Program.coach_id == coach.id,
+                    models.Program.program_type == "rehab",
+                    models.Program.body_regions.contains([data.body_region]),
+                    models.Program.archived == False,
+                ).all()
+
+                if matching:
+                    # Most overlap with the flagged region; break ties by newest
+                    best = max(
+                        matching,
+                        key=lambda p: (
+                            len(set(p.body_regions or []) & {data.body_region}),
+                            p.created_at,
+                        ),
+                    )
+                    db.add(models.ProgramAssignment(
+                        program_id=best.id,
+                        athlete_id=current_athlete.id,
+                        start_date=datetime.now(timezone.utc),
+                    ))
+                    db.add(models.Notification(
+                        coach_id=coach.id,
+                        athlete_id=current_athlete.id,
+                        workout_log_id=workout_log.id,
+                        program_id=best.id,
+                        notification_type="rehab_assigned",
+                        message=(
+                            f"{current_athlete.name} flagged a {region_label} injury — "
+                            f"'{best.name}' was automatically assigned."
+                        ),
+                        is_read=False,
+                    ))
+                else:
+                    db.add(models.Notification(
+                        coach_id=coach.id,
+                        athlete_id=current_athlete.id,
+                        workout_log_id=workout_log.id,
+                        program_id=None,
+                        notification_type="injury_no_rehab",
+                        message=(
+                            f"{current_athlete.name} flagged a {region_label} injury — "
+                            f"no matching rehab program found. "
+                            f"Assign an existing program or create a new one."
+                        ),
+                        is_read=False,
+                    ))
+            else:
+                db.add(models.Notification(
+                    coach_id=coach.id,
+                    athlete_id=current_athlete.id,
+                    workout_log_id=workout_log.id,
+                    program_id=None,
+                    notification_type="injury_no_rehab",
+                    message=(
+                        f"{current_athlete.name} flagged a workout "
+                        f"but did not specify a body region. "
+                        f"Please follow up manually."
+                    ),
+                    is_read=False,
+                ))
+    except Exception as e:
+        logger.error(
+            "Notification/rehab logic failed for athlete %s workout_log %s: %s",
+            current_athlete.id, workout_log.id, e,
+        )
 
     db.commit()
     return {"message": "Workout flagged successfully"}

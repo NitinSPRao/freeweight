@@ -2,7 +2,7 @@
 
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import AuthGuard from "@/components/AuthGuard";
 import NavBar from "@/components/NavBar";
 import { coachApi, programApi, AthleteProfile, Workout } from "@/lib/api-endpoints";
@@ -22,6 +22,22 @@ interface ExerciseDraft {
   target_weight: string;
   coach_notes: string;
 }
+
+// ─── Body region constants ────────────────────────────────────────────────────
+
+const BODY_REGION_LABELS: Record<string, string> = {
+  neck_upper_back: "Neck & Upper Back",
+  shoulder: "Shoulder",
+  elbow_wrist: "Elbow & Wrist",
+  core_ribs: "Core & Ribs",
+  lower_back: "Lower Back",
+  hip: "Hip",
+  knee: "Knee",
+  lower_leg_shin: "Lower Leg & Shin",
+  ankle_foot: "Ankle & Foot",
+};
+
+const ALL_BODY_REGIONS = Object.keys(BODY_REGION_LABELS);
 
 // ─── Step indicators ─────────────────────────────────────────────────────────
 
@@ -80,6 +96,7 @@ function StepIndicator({ current }: { current: number }) {
 export default function CreateProgramPage() {
   const { user } = getAuthData();
   const router = useRouter();
+  const searchParams = useSearchParams();
 
   // Wizard state
   const [step, setStep] = useState(1);
@@ -88,6 +105,18 @@ export default function CreateProgramPage() {
   // Step 1: program info
   const [programName, setProgramName] = useState("");
   const [programDesc, setProgramDesc] = useState("");
+  const [programType, setProgramType] = useState<"strength" | "rehab">(
+    searchParams.get("type") === "rehab" ? "rehab" : "strength"
+  );
+  const [selectedBodyRegions, setSelectedBodyRegions] = useState<string[]>(() => {
+    const region = searchParams.get("body_region");
+    return region && BODY_REGION_LABELS[region] ? [region] : [];
+  });
+
+  const toggleBodyRegion = (region: string) =>
+    setSelectedBodyRegions((prev) =>
+      prev.includes(region) ? prev.filter((r) => r !== region) : [...prev, region]
+    );
 
   // Created program ID (set after step 1 mutation)
   const [programId, setProgramId] = useState<number | null>(null);
@@ -110,7 +139,12 @@ export default function CreateProgramPage() {
   // ── Mutations ──────────────────────────────────────────────────────────────
 
   const createProgramMutation = useMutation({
-    mutationFn: () => programApi.create({ name: programName, description: programDesc || undefined }),
+    mutationFn: () => programApi.create({
+      name: programName,
+      description: programDesc || undefined,
+      program_type: programType,
+      body_regions: programType === "rehab" ? selectedBodyRegions : null,
+    }),
     onSuccess: (data) => {
       setProgramId(data.id);
       setStep(2);
@@ -299,6 +333,64 @@ export default function CreateProgramPage() {
                     placeholder="Optional — describe the program focus, goals, etc."
                   />
                 </div>
+
+                {/* Program type toggle */}
+                <div>
+                  <label className="block text-sm font-medium text-text mb-2">Program Type</label>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setProgramType("strength")}
+                      className={`flex-1 py-2.5 px-4 rounded-lg text-sm font-medium border transition-colors ${
+                        programType === "strength"
+                          ? "bg-primary/20 border-primary text-primary"
+                          : "bg-background border-secondary/30 text-secondary hover:border-secondary/60"
+                      }`}
+                    >
+                      Strength Training
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setProgramType("rehab")}
+                      className={`flex-1 py-2.5 px-4 rounded-lg text-sm font-medium border transition-colors ${
+                        programType === "rehab"
+                          ? "bg-amber-400/20 border-amber-400 text-amber-400"
+                          : "bg-background border-secondary/30 text-secondary hover:border-secondary/60"
+                      }`}
+                    >
+                      Rehab / PT
+                    </button>
+                  </div>
+                </div>
+
+                {/* Body regions — only shown for rehab programs */}
+                {programType === "rehab" && (
+                  <div>
+                    <label className="block text-sm font-medium text-text mb-2">
+                      Target Body Regions
+                      <span className="text-secondary font-normal ml-1">(select all that apply)</span>
+                    </label>
+                    <div className="flex flex-wrap gap-2">
+                      {ALL_BODY_REGIONS.map((region) => {
+                        const selected = selectedBodyRegions.includes(region);
+                        return (
+                          <button
+                            key={region}
+                            type="button"
+                            onClick={() => toggleBodyRegion(region)}
+                            className={`text-sm px-3 py-1.5 rounded-full border transition-colors ${
+                              selected
+                                ? "bg-amber-400/20 border-amber-400 text-amber-400"
+                                : "bg-background border-secondary/30 text-secondary hover:border-secondary/60"
+                            }`}
+                          >
+                            {BODY_REGION_LABELS[region]}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
               </div>
               <div className="mt-8 flex justify-end">
                 <button
