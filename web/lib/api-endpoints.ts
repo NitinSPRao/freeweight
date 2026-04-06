@@ -4,6 +4,28 @@ import apiClient from "./api-client";
 // TYPE DEFINITIONS
 // ============================================================================
 
+export interface ParsedExercise {
+  name: string;
+  sets: number;
+  reps: number;
+  coach_notes: string | null;
+  order: number;
+  rest_seconds: number | null;
+}
+
+export interface ParsedWorkout {
+  name: string;
+  day_offset: number;
+  description: string | null;
+  exercises: ParsedExercise[];
+}
+
+export interface ParsedProgram {
+  program_name: string;
+  description: string | null;
+  workouts: ParsedWorkout[];
+}
+
 export interface AthleteMax {
   id: number;
   exercise_name: string;
@@ -427,6 +449,18 @@ export const programApi = {
     return response.data;
   },
 
+  delete: async (programId: number) => {
+    const response = await apiClient.delete(`/api/programs/${programId}`);
+    return response.data;
+  },
+
+  duplicate: async (programId: number) => {
+    const response = await apiClient.post<{ program_id: number; program_name: string }>(
+      `/api/programs/${programId}/duplicate`
+    );
+    return response.data;
+  },
+
   archive: async (programId: number) => {
     const response = await apiClient.post(`/api/programs/${programId}/archive`);
     return response.data;
@@ -485,6 +519,25 @@ export const programApi = {
 
   deleteExercise: async (exerciseId: number) => {
     const response = await apiClient.delete(`/api/programs/exercises/${exerciseId}`);
+    return response.data;
+  },
+
+  parseProgram: async (formData: FormData) => {
+    const response = await apiClient.post<ParsedProgram>(
+      "/api/coaches/programs/parse",
+      formData,
+      { headers: { "Content-Type": "multipart/form-data" } }
+    );
+    return response.data;
+  },
+
+  importProgram: async (data: ParsedProgram) => {
+    const response = await apiClient.post<{
+      program_id: number;
+      program_name: string;
+      workout_count: number;
+      exercise_count: number;
+    }>("/api/coaches/programs/import", data);
     return response.data;
   },
 

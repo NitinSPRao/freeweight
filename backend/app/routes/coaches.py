@@ -6,7 +6,7 @@ from pydantic import BaseModel
 import json
 from ..database import get_db
 from ..auth import get_current_coach
-from ..models import User, Group, Subgroup, WorkoutLog, AthleteMax, Workout, ProgramAssignment, group_members
+from ..models import User, Group, Subgroup, WorkoutLog, AthleteMax, Workout, ProgramAssignment, group_members, Program, Exercise
 from ..schemas.coach import (
     DashboardResponse,
     RosterResponse,
@@ -426,3 +426,79 @@ def acknowledge_workout_log(
     db.commit()
 
     return {"message": "Workout log acknowledged"}
+
+
+# ─── Program Import (from AI parse) ───────────────────────────────────────────
+
+class ImportExercise(BaseModel):
+    name: str
+    sets: int
+    reps: int
+    coach_notes: Optional[str] = None
+    order: int
+    rest_seconds: Optional[int] = None
+
+
+class ImportWorkout(BaseModel):
+    name: str
+    day_offset: int
+    description: Optional[str] = None
+    exercises: List[ImportExercise]
+
+
+class ImportProgramRequest(BaseModel):
+    program_name: str
+    description: Optional[str] = None
+    workouts: List[ImportWorkout]
+
+
+@router.post("/programs/import")
+def import_program(
+    data: ImportProgramRequest,
+    current_coach: User = Depends(get_current_coach),
+    db: Session = Depends(get_db),
+):
+    """Save an AI-parsed workout program to the database."""
+    program = Program(
+        name=data.program_name,
+        description=data.description,
+        coach_id=current_coach.id,
+    )
+    db.add(program)
+    db.flush()  # get program.id before creating workouts
+
+    exercise_count = 0
+    now = datetime.now(timezone.utc)
+
+    for w_data in data.workouts:
+        workout = Workout(
+            program_id=program.id,
+            name=w_data.name,
+            day_offset=w_data.day_offset,
+            description=w_data.description,
+            scheduled_date=now + timedelta(days=w_data.day_offset),
+        )
+        db.add(workout)
+        db.flush()  # get workout.id before creating exercises
+
+        for e_data in w_data.exercises:
+            exercise = Exercise(
+                workout_id=workout.id,
+                name=e_data.name,
+                sets=e_data.sets,
+                reps=e_data.reps,
+                coach_notes=e_data.coach_notes,
+                order=e_data.order,
+                rest_seconds=e_data.rest_seconds,
+            )
+            db.add(exercise)
+            exercise_count += 1
+
+    db.commit()
+
+    return {
+        "program_id": program.id,
+        "program_name": program.name,
+        "workout_count": len(data.workouts),
+        "exercise_count": exercise_count,
+    }

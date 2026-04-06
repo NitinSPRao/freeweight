@@ -4,7 +4,7 @@ from datetime import datetime, timedelta
 from typing import List
 from ..database import get_db
 from ..auth import get_current_coach
-from ..models import User, Program, Workout, Exercise, ProgramAssignment, Group, Subgroup
+from ..models import User, Program, Workout, Exercise, ProgramAssignment, Group, Subgroup, WorkoutLog, SetLog
 from ..schemas.program import (
     ProgramCreate,
     ProgramResponse,
@@ -58,13 +58,27 @@ def _serialize_program(program: Program, include_workouts: bool = True) -> Progr
     )
 
 
+@router.get("/archived", response_model=List[ProgramResponse])
+def list_archived_programs(
+    current_coach: User = Depends(get_current_coach),
+    db: Session = Depends(get_db)
+):
+    programs = db.query(Program).filter(
+        Program.coach_id == current_coach.id,
+        Program.archived == True
+    ).order_by(Program.created_at.desc()).all()
+
+    return [_serialize_program(p, include_workouts=False) for p in programs]
+
+
 @router.get("", response_model=List[ProgramResponse])
 def list_programs(
     current_coach: User = Depends(get_current_coach),
     db: Session = Depends(get_db)
 ):
     programs = db.query(Program).filter(
-        Program.coach_id == current_coach.id
+        Program.coach_id == current_coach.id,
+        Program.archived == False
     ).order_by(Program.created_at.desc()).all()
 
     return [_serialize_program(p, include_workouts=False) for p in programs]
@@ -191,6 +205,46 @@ def add_exercise_to_workout(
     )
 
 
+@router.post("/{program_id}/archive")
+def archive_program(
+    program_id: int,
+    current_coach: User = Depends(get_current_coach),
+    db: Session = Depends(get_db)
+):
+    program = db.query(Program).filter(
+        Program.id == program_id,
+        Program.coach_id == current_coach.id
+    ).first()
+
+    if not program:
+        raise HTTPException(status_code=404, detail="Program not found")
+
+    program.archived = True
+    db.commit()
+
+    return {"message": "Program archived"}
+
+
+@router.post("/{program_id}/restore")
+def restore_program(
+    program_id: int,
+    current_coach: User = Depends(get_current_coach),
+    db: Session = Depends(get_db)
+):
+    program = db.query(Program).filter(
+        Program.id == program_id,
+        Program.coach_id == current_coach.id
+    ).first()
+
+    if not program:
+        raise HTTPException(status_code=404, detail="Program not found")
+
+    program.archived = False
+    db.commit()
+
+    return {"message": "Program restored"}
+
+
 @router.post("/{program_id}/assign")
 def assign_program(
     program_id: int,
@@ -294,3 +348,133 @@ def assign_program(
         "athletes_assigned": len(athletes),
         "sessions_created": len(template_workouts) * len(athletes)
     }
+
+
+@router.delete("/workouts/{workout_id}")
+def delete_workout(
+    workout_id: int,
+    current_coach: User = Depends(get_current_coach),
+    db: Session = Depends(get_db)
+):
+    workout = db.query(Workout).join(Program).filter(
+        Workout.id == workout_id,
+        Program.coach_id == current_coach.id
+    ).first()
+
+    if not workout:
+        raise HTTPException(status_code=404, detail="Workout not found")
+
+    workout_log_ids = [wl.id for wl in db.query(WorkoutLog).filter(WorkoutLog.workout_id == workout_id).all()]
+    if workout_log_ids:
+        db.query(SetLog).filter(SetLog.workout_log_id.in_(workout_log_ids)).delete(synchronize_session=False)
+    db.query(WorkoutLog).filter(WorkoutLog.workout_id == workout_id).delete(synchronize_session=False)
+    db.query(Exercise).filter(Exercise.workout_id == workout_id).delete(synchronize_session=False)
+    db.delete(workout)
+    db.commit()
+
+    return {"message": "Workout deleted"}
+
+
+@router.delete("/exercises/{exercise_id}")
+def delete_exercise(
+    exercise_id: int,
+    current_coach: User = Depends(get_current_coach),
+    db: Session = Depends(get_db)
+):
+    exercise = db.query(Exercise).join(Workout).join(Program).filter(
+        Exercise.id == exercise_id,
+        Program.coach_id == current_coach.id
+    ).first()
+
+    if not exercise:
+        raise HTTPException(status_code=404, detail="Exercise not found")
+
+    db.query(SetLog).filter(SetLog.exercise_id == exercise_id).delete(synchronize_session=False)
+    db.delete(exercise)
+    db.commit()
+
+    return {"message": "Exercise deleted"}
+
+
+@router.post("/{program_id}/duplicate")
+def duplicate_program(
+    program_id: int,
+    current_coach: User = Depends(get_current_coach),
+    db: Session = Depends(get_db)
+):
+    program = db.query(Program).filter(
+        Program.id == program_id,
+        Program.coach_id == current_coach.id
+    ).first()
+
+    if not program:
+        raise HTTPException(status_code=404, detail="Program not found")
+
+    new_program = Program(
+        coach_id=current_coach.id,
+        name=f"{program.name} (Copy)",
+        description=program.description
+    )
+    db.add(new_program)
+    db.flush()
+
+    template_workouts = [w for w in program.workouts if w.athlete_id is None]
+    for workout in template_workouts:
+        new_workout = Workout(
+            program_id=new_program.id,
+            name=workout.name,
+            day_offset=workout.day_offset,
+            description=workout.description,
+            scheduled_date=workout.scheduled_date
+        )
+        db.add(new_workout)
+        db.flush()
+
+        for exercise in sorted(workout.exercises, key=lambda e: e.order):
+            db.add(Exercise(
+                workout_id=new_workout.id,
+                name=exercise.name,
+                sets=exercise.sets,
+                reps=exercise.reps,
+                percentage_of_max=exercise.percentage_of_max,
+                target_exercise=exercise.target_exercise,
+                video_url=exercise.video_url,
+                coach_notes=exercise.coach_notes,
+                order=exercise.order,
+                rest_seconds=exercise.rest_seconds
+            ))
+
+    db.commit()
+
+    return {"program_id": new_program.id, "program_name": new_program.name}
+
+
+@router.delete("/{program_id}")
+def delete_program(
+    program_id: int,
+    current_coach: User = Depends(get_current_coach),
+    db: Session = Depends(get_db)
+):
+    program = db.query(Program).filter(
+        Program.id == program_id,
+        Program.coach_id == current_coach.id
+    ).first()
+
+    if not program:
+        raise HTTPException(status_code=404, detail="Program not found")
+
+    workout_ids = [w.id for w in db.query(Workout).filter(Workout.program_id == program_id).all()]
+
+    if workout_ids:
+        workout_log_ids = [wl.id for wl in db.query(WorkoutLog).filter(WorkoutLog.workout_id.in_(workout_ids)).all()]
+        if workout_log_ids:
+            db.query(SetLog).filter(SetLog.workout_log_id.in_(workout_log_ids)).delete(synchronize_session=False)
+        db.query(WorkoutLog).filter(WorkoutLog.workout_id.in_(workout_ids)).delete(synchronize_session=False)
+        db.query(Exercise).filter(Exercise.workout_id.in_(workout_ids)).delete(synchronize_session=False)
+
+    db.query(ProgramAssignment).filter(ProgramAssignment.program_id == program_id).delete(synchronize_session=False)
+    db.query(Workout).filter(Workout.program_id == program_id).delete(synchronize_session=False)
+    db.delete(program)
+    db.commit()
+
+    return {"message": "Program deleted"}
