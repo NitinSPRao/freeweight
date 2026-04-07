@@ -70,6 +70,7 @@ class FlagRequest(BaseModel):
     reason: str
     body_region: Optional[str] = None
     body_region_detail: Optional[str] = None
+    opt_in_rehab: bool = False
 
 class WorkoutLogResponse(BaseModel):
     id: int

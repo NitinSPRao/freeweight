@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { getAuthData, saveAuthData } from "@/lib/auth";
 import apiClient from "@/lib/api-client";
+import { extractErrorMessage } from "@/lib/utils";
 
 export default function CoachOnboardingPage() {
   const router = useRouter();
@@ -55,7 +56,7 @@ export default function CoachOnboardingPage() {
       router.push("/coach/dashboard");
     } catch (err: any) {
       console.error("Onboarding error:", err);
-      setError(err.response?.data?.detail || "Failed to complete onboarding");
+      setError(extractErrorMessage(err, "Failed to complete onboarding"));
       setLoading(false);
     }
   };

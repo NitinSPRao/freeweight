@@ -67,6 +67,13 @@ HANDLING ANY FORMAT:
   Always capture rest_seconds when stated. Convert to seconds:
   "30s" → 30, "1 min" or "1m" → 60, "90s" → 90,
   "No rest" or "none" → 0. If not stated, use null.
+- Video URLs: when you see a cell formatted as
+  "Video [URL: https://...]" or "Link [URL: https://...]"
+  or any text followed by "[URL: ...]", that URL is the
+  video demonstration link for the exercise in that row.
+  Store it in the video_url field of that exercise.
+  Do not include the "[URL: ...]" text in coach_notes —
+  it belongs only in video_url.
 - Return ONLY valid JSON. No markdown, no backticks, no preamble.
   First character must be '{'.
 """
@@ -98,7 +105,12 @@ def _read_xlsx(contents: bytes) -> str:
         ws = wb[sheet_name]
         sections.append(f"=== Sheet: {sheet_name} ===")
         for row in ws.iter_rows():
-            row_vals = [_cell_to_str(cell.value) for cell in row]
+            row_vals = []
+            for cell in row:
+                val = _cell_to_str(cell.value)
+                if cell.hyperlink is not None:
+                    val = f"{val} [URL: {cell.hyperlink.target}]"
+                row_vals.append(val)
             if any(row_vals):
                 sections.append(" | ".join(row_vals))
             else:

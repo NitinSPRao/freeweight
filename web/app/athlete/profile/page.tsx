@@ -7,6 +7,7 @@ import AuthGuard from "@/components/AuthGuard";
 import NavBar from "@/components/NavBar";
 import { athleteApi } from "@/lib/api-endpoints";
 import { getAuthData, saveAuthData, authApi } from "@/lib/auth";
+import { extractErrorMessage } from "@/lib/utils";
 
 const EXPERIENCE_OPTIONS = [
   { value: "beginner", label: "Beginner" },
@@ -61,7 +62,7 @@ export default function AthleteProfilePage() {
       alert("Coach changed successfully!");
     },
     onError: (error: any) => {
-      alert(error.response?.data?.detail || "Failed to change coach.");
+      alert(extractErrorMessage(error, "Failed to change coach."));
     },
   });
 
@@ -84,7 +85,7 @@ export default function AthleteProfilePage() {
       // Force re-render
       window.location.reload();
     } catch (err: any) {
-      alert(err.response?.data?.detail || "Failed to upload photo.");
+      alert(extractErrorMessage(err, "Failed to upload photo."));
     } finally {
       setPhotoUploading(false);
     }

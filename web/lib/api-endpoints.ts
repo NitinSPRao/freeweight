@@ -25,6 +25,7 @@ export interface ParsedProgram {
   description: string | null;
   workouts: ParsedWorkout[];
   program_type?: string;
+  body_regions?: string[] | null;
 }
 
 export interface AthleteMax {
@@ -272,10 +273,19 @@ export const athleteApi = {
     return response.data;
   },
 
-  flagWorkout: async (workoutId: number, reason: string) => {
-    const response = await apiClient.post(`/api/athletes/workouts/${workoutId}/flag`, {
-      reason,
-    });
+  flagWorkout: async (
+    workoutId: number,
+    data: {
+      reason: string;
+      body_region?: string | null;
+      body_region_detail?: string | null;
+      opt_in_rehab?: boolean;
+    }
+  ) => {
+    const response = await apiClient.post(
+      `/api/athletes/workouts/${workoutId}/flag`,
+      data
+    );
     return response.data;
   },
 

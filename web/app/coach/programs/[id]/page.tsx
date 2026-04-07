@@ -7,7 +7,7 @@ import AuthGuard from "@/components/AuthGuard";
 import NavBar from "@/components/NavBar";
 import { programApi, coachApi, AthleteProfile } from "@/lib/api-endpoints";
 import { getAuthData } from "@/lib/auth";
-import { formatDate } from "@/lib/utils";
+import { formatDate, extractErrorMessage } from "@/lib/utils";
 import Link from "next/link";
 
 export default function ProgramDetailPage() {
@@ -57,7 +57,7 @@ export default function ProgramDetailPage() {
       setAssignStartDate("");
     },
     onError: (err: any) => {
-      setAssignError(err?.response?.data?.detail ?? "Failed to assign program.");
+      setAssignError(extractErrorMessage(err, "Failed to assign program."));
     },
   });
 

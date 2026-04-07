@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { authApi, saveAuthData, SignupData } from "@/lib/auth";
+import { extractErrorMessage } from "@/lib/utils";
 
 export default function SignupPage() {
   const router = useRouter();
@@ -42,7 +43,7 @@ export default function SignupPage() {
         router.push("/athlete/onboarding");
       }
     } catch (err: any) {
-      setError(err.response?.data?.detail || "Signup failed. Please try again.");
+      setError(extractErrorMessage(err, "Signup failed. Please try again."));
     } finally {
       setLoading(false);
     }

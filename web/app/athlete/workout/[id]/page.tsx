@@ -32,6 +32,9 @@ export default function WorkoutPage() {
   const [showCustomInput, setShowCustomInput] = useState(false);
   const [showFlagModal, setShowFlagModal] = useState(false);
   const [flagReason, setFlagReason] = useState("");
+  const [flagBodyRegion, setFlagBodyRegion] = useState<string | null>(null);
+  const [flagBodyRegionDetail, setFlagBodyRegionDetail] = useState("");
+  const [flagOptInRehab, setFlagOptInRehab] = useState(false);
   const [completionNotes, setCompletionNotes] = useState("");
   const [showCompletionModal, setShowCompletionModal] = useState(false);
   const [workoutStarted, setWorkoutStarted] = useState(false);
@@ -74,7 +77,12 @@ export default function WorkoutPage() {
   });
 
   const flagWorkoutMutation = useMutation({
-    mutationFn: (reason: string) => athleteApi.flagWorkout(workoutId, reason),
+    mutationFn: (data: {
+      reason: string;
+      body_region?: string | null;
+      body_region_detail?: string | null;
+      opt_in_rehab?: boolean;
+    }) => athleteApi.flagWorkout(workoutId, data),
     onSuccess: () => router.push("/athlete/home"),
   });
 
@@ -457,34 +465,130 @@ export default function WorkoutPage() {
         )}
 
         {/* Flag Modal */}
-        {showFlagModal && (
-          <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
-            <div className="bg-[#1F2937] rounded-lg p-6 max-w-md w-full">
-              <h3 className="text-xl font-heading font-bold text-text mb-4">Flag Workout</h3>
-              <p className="text-secondary text-sm mb-4">
-                Let your coach know if something didn&apos;t feel right.
-              </p>
-              <textarea
-                value={flagReason}
-                onChange={(e) => setFlagReason(e.target.value)}
-                placeholder="Describe what happened..."
-                className="input-field mb-4 min-h-[100px]"
-              />
-              <div className="flex gap-3">
-                <button onClick={() => setShowFlagModal(false)} className="btn-secondary flex-1">
-                  Cancel
-                </button>
-                <button
-                  onClick={() => flagReason.trim() && flagWorkoutMutation.mutate(flagReason)}
-                  disabled={!flagReason.trim() || flagWorkoutMutation.isPending}
-                  className="btn-primary flex-1"
-                >
-                  Submit Flag
-                </button>
+        {showFlagModal && (() => {
+          const BODY_REGIONS = [
+            { key: "neck_upper_back", label: "Neck & Upper Back", detail_placeholder: "e.g. upper trap tightness" },
+            { key: "shoulder", label: "Shoulder", detail_placeholder: "e.g. rotator cuff, AC joint" },
+            { key: "elbow_wrist", label: "Elbow & Wrist", detail_placeholder: "e.g. tennis elbow, wrist pain" },
+            { key: "core_ribs", label: "Core & Ribs", detail_placeholder: "e.g. rib stress fracture, oblique strain" },
+            { key: "lower_back", label: "Lower Back", detail_placeholder: "e.g. disc pain, SI joint" },
+            { key: "hip", label: "Hip", detail_placeholder: "e.g. hip flexor, labrum" },
+            { key: "knee", label: "Knee", detail_placeholder: "e.g. IT band, ACL, patellar tendon" },
+            { key: "lower_leg_shin", label: "Lower Leg & Shin", detail_placeholder: "e.g. shin splints, stress fracture" },
+            { key: "ankle_foot", label: "Ankle & Foot", detail_placeholder: "e.g. achilles, ankle sprain" },
+          ];
+
+          const closeFlagModal = () => {
+            setShowFlagModal(false);
+            setFlagReason("");
+            setFlagBodyRegion(null);
+            setFlagBodyRegionDetail("");
+            setFlagOptInRehab(false);
+          };
+
+          const selectedRegion = BODY_REGIONS.find((r) => r.key === flagBodyRegion);
+
+          return (
+            <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+              <div className="bg-[#1F2937] rounded-lg p-6 max-w-md w-full max-h-[90vh] overflow-y-auto">
+                <h3 className="text-xl font-heading font-bold text-text mb-1">Flag Workout</h3>
+                <p className="text-secondary text-sm mb-5">Your coach will be notified.</p>
+
+                {/* Section 1 — What happened? */}
+                <div className="mb-5">
+                  <textarea
+                    value={flagReason}
+                    onChange={(e) => setFlagReason(e.target.value)}
+                    placeholder="Describe what happened..."
+                    className="input-field min-h-[100px]"
+                  />
+                </div>
+
+                {/* Section 2 — Where does it hurt? */}
+                <div className="mb-5">
+                  <p className="text-sm font-medium text-text mb-3">
+                    Where does it hurt?{" "}
+                    <span className="text-secondary font-normal">(optional)</span>
+                  </p>
+                  <div className="grid grid-cols-3 gap-2 mb-3">
+                    {BODY_REGIONS.map((region) => {
+                      const isSelected = flagBodyRegion === region.key;
+                      return (
+                        <button
+                          key={region.key}
+                          onClick={() => {
+                            if (isSelected) {
+                              setFlagBodyRegion(null);
+                              setFlagBodyRegionDetail("");
+                              setFlagOptInRehab(false);
+                            } else {
+                              setFlagBodyRegion(region.key);
+                            }
+                          }}
+                          className={`py-2 px-1 rounded-lg text-xs font-medium border transition-colors ${
+                            isSelected
+                              ? "border-amber-400 text-amber-400 bg-amber-400/10"
+                              : "border-secondary/30 text-secondary bg-background hover:border-secondary/60"
+                          }`}
+                        >
+                          {region.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                  {flagBodyRegion && (
+                    <div>
+                      <label className="block text-xs text-secondary mb-1">Specify further (optional)</label>
+                      <input
+                        type="text"
+                        value={flagBodyRegionDetail}
+                        onChange={(e) => setFlagBodyRegionDetail(e.target.value)}
+                        placeholder={selectedRegion?.detail_placeholder ?? ""}
+                        className="input-field text-sm"
+                      />
+                    </div>
+                  )}
+                </div>
+
+                {/* Section 3 — Rehab checkbox (only when region selected) */}
+                {flagBodyRegion && (
+                  <div className="mb-5">
+                    <label className="flex items-center gap-3 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={flagOptInRehab}
+                        onChange={(e) => setFlagOptInRehab(e.target.checked)}
+                        className="w-4 h-4 accent-primary"
+                      />
+                      <span className="text-text text-sm">Request a rehab program for this area</span>
+                    </label>
+                  </div>
+                )}
+
+                {/* Actions */}
+                <div className="flex gap-3">
+                  <button onClick={closeFlagModal} className="btn-secondary flex-1">
+                    Cancel
+                  </button>
+                  <button
+                    onClick={() =>
+                      flagWorkoutMutation.mutate({
+                        reason: flagReason,
+                        body_region: flagBodyRegion,
+                        body_region_detail: flagBodyRegionDetail || null,
+                        opt_in_rehab: flagOptInRehab,
+                      })
+                    }
+                    disabled={!flagReason.trim() || flagWorkoutMutation.isPending}
+                    className="btn-primary flex-1"
+                  >
+                    {flagWorkoutMutation.isPending ? "Submitting…" : "Submit Flag"}
+                  </button>
+                </div>
               </div>
             </div>
-          </div>
-        )}
+          );
+        })()}
 
         {/* Rest Timer */}
         {showRestTimer && currentExercise && (

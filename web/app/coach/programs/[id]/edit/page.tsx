@@ -8,6 +8,7 @@ import AuthGuard from "@/components/AuthGuard";
 import NavBar from "@/components/NavBar";
 import { programApi } from "@/lib/api-endpoints";
 import { getAuthData } from "@/lib/auth";
+import { extractErrorMessage } from "@/lib/utils";
 
 // ─── Local state types ────────────────────────────────────────────────────────
 
@@ -133,7 +134,7 @@ export default function EditProgramPage() {
       setTimeout(() => setSavedProgram(false), 2000);
     },
     onError: (err: any) =>
-      setError(err?.response?.data?.detail ?? "Failed to update program."),
+      setError(extractErrorMessage(err, "Failed to update program.")),
   });
 
   const updateWorkoutMutation = useMutation({
@@ -147,7 +148,7 @@ export default function EditProgramPage() {
       day_offset: number;
     }) => programApi.updateWorkout(id, { name, day_offset }),
     onError: (err: any) =>
-      setError(err?.response?.data?.detail ?? "Failed to update workout."),
+      setError(extractErrorMessage(err, "Failed to update workout.")),
   });
 
   const deleteWorkoutMutation = useMutation({
@@ -157,7 +158,7 @@ export default function EditProgramPage() {
       setError(null);
     },
     onError: (err: any) =>
-      setError(err?.response?.data?.detail ?? "Failed to delete workout."),
+      setError(extractErrorMessage(err, "Failed to delete workout.")),
   });
 
   const addWorkoutMutation = useMutation({
@@ -181,7 +182,7 @@ export default function EditProgramPage() {
       setError(null);
     },
     onError: (err: any) =>
-      setError(err?.response?.data?.detail ?? "Failed to add workout."),
+      setError(extractErrorMessage(err, "Failed to add workout.")),
   });
 
   const updateExerciseMutation = useMutation({
@@ -205,7 +206,7 @@ export default function EditProgramPage() {
         coach_notes: coach_notes || undefined,
       }),
     onError: (err: any) =>
-      setError(err?.response?.data?.detail ?? "Failed to update exercise."),
+      setError(extractErrorMessage(err, "Failed to update exercise.")),
   });
 
   const deleteExerciseMutation = useMutation({
@@ -226,7 +227,7 @@ export default function EditProgramPage() {
       setError(null);
     },
     onError: (err: any) =>
-      setError(err?.response?.data?.detail ?? "Failed to delete exercise."),
+      setError(extractErrorMessage(err, "Failed to delete exercise.")),
   });
 
   const addExerciseMutation = useMutation({
@@ -266,7 +267,7 @@ export default function EditProgramPage() {
       setError(null);
     },
     onError: (err: any) =>
-      setError(err?.response?.data?.detail ?? "Failed to add exercise."),
+      setError(extractErrorMessage(err, "Failed to add exercise.")),
   });
 
   // ── Loading / not found ───────────────────────────────────────────────────

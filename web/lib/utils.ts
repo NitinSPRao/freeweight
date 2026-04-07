@@ -47,6 +47,12 @@ export function generateInviteCode(): string {
   return code;
 }
 
+export function extractErrorMessage(err: any, fallback = "An error occurred"): string {
+  const detail = err?.response?.data?.detail;
+  if (Array.isArray(detail)) return detail.map((e: any) => e.msg).join(", ");
+  return detail || fallback;
+}
+
 export function calculateTargetWeight(
   athleteMax: number,
   percentage: number

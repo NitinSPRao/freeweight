@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { authApi, saveAuthData } from "@/lib/auth";
+import { extractErrorMessage } from "@/lib/utils";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -64,7 +65,7 @@ export default function LoginPage() {
         router.push("/athlete/home");
       }
     } catch (err: any) {
-      setError(err.response?.data?.detail || "Login failed. Please check your credentials.");
+      setError(extractErrorMessage(err, "Login failed. Please check your credentials."));
     } finally {
       setLoading(false);
     }

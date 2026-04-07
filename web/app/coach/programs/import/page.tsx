@@ -7,6 +7,7 @@ import AuthGuard from "@/components/AuthGuard";
 import NavBar from "@/components/NavBar";
 import { programApi, ParsedProgram } from "@/lib/api-endpoints";
 import { getAuthData } from "@/lib/auth";
+import { extractErrorMessage } from "@/lib/utils";
 
 const FEEDBACK_OPTIONS = [
   "Section headers mistaken for exercises",
@@ -16,6 +17,19 @@ const FEEDBACK_OPTIONS = [
   "Exercise assigned to wrong day or week",
   "Workout days not separated correctly",
   "Coach notes or comments were lost",
+  "Other",
+];
+
+const BODY_REGIONS = [
+  { key: "neck_upper_back", label: "Neck & Upper Back" },
+  { key: "shoulder", label: "Shoulder" },
+  { key: "elbow_wrist", label: "Elbow & Wrist" },
+  { key: "core_ribs", label: "Core & Ribs" },
+  { key: "lower_back", label: "Lower Back" },
+  { key: "hip", label: "Hip" },
+  { key: "knee", label: "Knee" },
+  { key: "lower_leg_shin", label: "Lower Leg & Shin" },
+  { key: "ankle_foot", label: "Ankle & Foot" },
 ];
 
 type PageState = "upload" | "preview" | "saving" | "error";
@@ -49,6 +63,12 @@ export default function ImportProgramPage() {
   const [feedbackIssues, setFeedbackIssues] = useState<string[]>([]);
   const [feedbackText, setFeedbackText] = useState("");
   const [feedbackError, setFeedbackError] = useState("");
+  const [feedbackOtherText, setFeedbackOtherText] = useState("");
+
+  const [importProgramType, setImportProgramType] = useState<"strength" | "rehab">(
+    searchParams.get("type") === "rehab" ? "rehab" : "strength"
+  );
+  const [importBodyRegions, setImportBodyRegions] = useState<string[]>([]);
 
   // Track which workout cards are collapsed (empty = all expanded)
   const [collapsedWorkouts, setCollapsedWorkouts] = useState<Set<number>>(
@@ -93,10 +113,7 @@ export default function ImportProgramPage() {
       setPageState("preview");
       setShowFeedback(false);
     } catch (err: any) {
-      setErrorMsg(
-        err?.response?.data?.detail ||
-          "Failed to parse spreadsheet. Please try again."
-      );
+      setErrorMsg(extractErrorMessage(err, "Failed to parse spreadsheet. Please try again."));
       setPageState("error");
     } finally {
       setIsLoading(false);
@@ -113,7 +130,10 @@ export default function ImportProgramPage() {
     try {
       const formData = new FormData();
       formData.append("file", file);
-      formData.append("feedback_issues", feedbackIssues.join(", "));
+      const issuesWithOther = feedbackIssues.includes("Other") && feedbackOtherText.trim()
+        ? feedbackIssues.filter((i) => i !== "Other").concat(`Other: ${feedbackOtherText.trim()}`)
+        : feedbackIssues;
+      formData.append("feedback_issues", issuesWithOther.join(", "));
       if (feedbackText) formData.append("feedback_text", feedbackText);
       formData.append("previous_result", JSON.stringify(current));
       const result = await programApi.parseProgram(formData);
@@ -124,11 +144,10 @@ export default function ImportProgramPage() {
       setShowFeedback(false);
       setFeedbackIssues([]);
       setFeedbackText("");
+      setFeedbackOtherText("");
       window.scrollTo({ top: 0, behavior: "smooth" });
     } catch (err: any) {
-      setFeedbackError(
-        err?.response?.data?.detail || "Re-parse failed. Please try again."
-      );
+      setFeedbackError(extractErrorMessage(err, "Re-parse failed. Please try again."));
     } finally {
       setIsLoading(false);
     }
@@ -143,14 +162,14 @@ export default function ImportProgramPage() {
         ...current,
         program_name: programName,
         description: programDesc || null,
-        program_type: programType,
+        program_type: importProgramType,
+        body_regions: importProgramType === "rehab" && importBodyRegions.length > 0
+          ? importBodyRegions
+          : null,
       });
       router.push("/coach/programs");
     } catch (err: any) {
-      setErrorMsg(
-        err?.response?.data?.detail ||
-          "Failed to save program. Please try again."
-      );
+      setErrorMsg(extractErrorMessage(err, "Failed to save program. Please try again."));
       setPageState("preview");
     }
   };
@@ -278,6 +297,72 @@ export default function ImportProgramPage() {
                 className="hidden"
                 onChange={handleFileChange}
               />
+
+              {/* Program type toggle */}
+              <div className="mt-6">
+                <label className="block text-sm font-medium text-text mb-2">
+                  Program Type
+                </label>
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setImportProgramType("strength")}
+                    className={`flex-1 py-2 px-4 rounded-lg font-medium text-sm transition-colors ${
+                      importProgramType === "strength"
+                        ? "bg-primary text-background"
+                        : "bg-secondary/20 text-secondary hover:text-text"
+                    }`}
+                  >
+                    Strength Training
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setImportProgramType("rehab")}
+                    className={`flex-1 py-2 px-4 rounded-lg font-medium text-sm transition-colors ${
+                      importProgramType === "rehab"
+                        ? "bg-primary text-background"
+                        : "bg-secondary/20 text-secondary hover:text-text"
+                    }`}
+                  >
+                    Rehab / PT
+                  </button>
+                </div>
+              </div>
+
+              {/* Body regions — only shown for rehab */}
+              {importProgramType === "rehab" && (
+                <div className="mt-4">
+                  <label className="block text-sm font-medium text-text mb-1">
+                    Target Body Regions{" "}
+                    <span className="text-secondary font-normal">(select all that apply)</span>
+                  </label>
+                  <div className="flex flex-wrap gap-2 mt-2">
+                    {BODY_REGIONS.map((region) => {
+                      const selected = importBodyRegions.includes(region.key);
+                      return (
+                        <button
+                          key={region.key}
+                          type="button"
+                          onClick={() =>
+                            setImportBodyRegions((prev) =>
+                              selected
+                                ? prev.filter((k) => k !== region.key)
+                                : [...prev, region.key]
+                            )
+                          }
+                          className={`px-3 py-1.5 rounded-full text-sm font-medium border transition-colors ${
+                            selected
+                              ? "border-amber-400 text-amber-400 bg-amber-400/10"
+                              : "border-secondary/30 text-secondary bg-background hover:border-secondary/60"
+                          }`}
+                        >
+                          {region.label}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
 
               <div className="mt-6">
                 <button
@@ -441,6 +526,21 @@ export default function ImportProgramPage() {
                     ))}
                   </div>
 
+                  {feedbackIssues.includes("Other") && (
+                    <div className="mb-4">
+                      <label className="block text-sm font-medium text-text mb-2">
+                        Please explain:
+                      </label>
+                      <textarea
+                        value={feedbackOtherText}
+                        onChange={(e) => setFeedbackOtherText(e.target.value)}
+                        className="input-field"
+                        placeholder="Describe what went wrong..."
+                        rows={3}
+                      />
+                    </div>
+                  )}
+
                   <div className="mb-4">
                     <textarea
                       value={feedbackText}
@@ -459,7 +559,11 @@ export default function ImportProgramPage() {
 
                   <button
                     onClick={handleReparse}
-                    disabled={feedbackIssues.length === 0 || isLoading}
+                    disabled={
+                      feedbackIssues.length === 0 ||
+                      (feedbackIssues.includes("Other") && !feedbackOtherText.trim()) ||
+                      isLoading
+                    }
                     className="btn-primary w-full"
                   >
                     {isLoading ? "Re-analyzing with your feedback..." : "Re-parse"}
@@ -476,7 +580,10 @@ export default function ImportProgramPage() {
             <div className="max-w-3xl mx-auto flex justify-between items-center gap-3">
               <button
                 onClick={() => {
-                  setShowFeedback((prev) => !prev);
+                  setShowFeedback((prev) => {
+                    if (prev) setFeedbackOtherText("");
+                    return !prev;
+                  });
                   setFeedbackError("");
                 }}
                 className="px-4 py-2 rounded-lg border border-amber-500 text-amber-600 hover:bg-amber-500/10 text-sm font-medium transition-colors"

@@ -7,6 +7,7 @@ import AuthGuard from "@/components/AuthGuard";
 import NavBar from "@/components/NavBar";
 import { coachApi, programApi, AthleteProfile, Workout } from "@/lib/api-endpoints";
 import { getAuthData } from "@/lib/auth";
+import { extractErrorMessage } from "@/lib/utils";
 
 // ─── Local types ────────────────────────────────────────────────────────────
 
@@ -151,7 +152,7 @@ export default function CreateProgramPage() {
       setError(null);
     },
     onError: (err: any) => {
-      setError(err?.response?.data?.detail || "Failed to create program.");
+      setError(extractErrorMessage(err, "Failed to create program."));
     },
   });
 
@@ -175,7 +176,7 @@ export default function CreateProgramPage() {
       setError(null);
     },
     onError: (err: any) => {
-      setError(err?.response?.data?.detail || "Failed to add workouts.");
+      setError(extractErrorMessage(err, "Failed to add workouts."));
     },
   });
 
@@ -202,7 +203,7 @@ export default function CreateProgramPage() {
       setError(null);
     },
     onError: (err: any) => {
-      setError(err?.response?.data?.detail || "Failed to add exercises.");
+      setError(extractErrorMessage(err, "Failed to add exercises."));
     },
   });
 
@@ -220,7 +221,7 @@ export default function CreateProgramPage() {
       router.push("/coach/programs");
     },
     onError: (err: any) => {
-      setError(err?.response?.data?.detail || "Failed to assign program.");
+      setError(extractErrorMessage(err, "Failed to assign program."));
     },
   });
 

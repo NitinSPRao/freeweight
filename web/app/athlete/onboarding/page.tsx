@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { getAuthData, saveAuthData, authApi } from "@/lib/auth";
 import { athleteApi } from "@/lib/api-endpoints";
+import { extractErrorMessage } from "@/lib/utils";
 
 const EXPERIENCE_LEVELS = [
   { value: "beginner", label: "Beginner", desc: "New to strength training (< 1 year)" },
@@ -127,7 +128,7 @@ export default function AthleteOnboardingPage() {
       localStorage.removeItem("has_coach");
       router.push("/athlete/home");
     } catch (err: any) {
-      setError(err.response?.data?.detail || "Something went wrong. Please try again.");
+      setError(extractErrorMessage(err, "Something went wrong. Please try again."));
     } finally {
       setLoading(false);
     }

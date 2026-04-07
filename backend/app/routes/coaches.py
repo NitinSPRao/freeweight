@@ -556,6 +556,7 @@ class ImportProgramRequest(BaseModel):
     description: Optional[str] = None
     workouts: List[ImportWorkout]
     program_type: Optional[str] = "strength"
+    body_regions: Optional[List[str]] = None
 
 
 @router.post("/programs/import")
@@ -570,6 +571,7 @@ def import_program(
         description=data.description,
         coach_id=current_coach.id,
         program_type=data.program_type or "strength",
+        body_regions=data.body_regions or None,
     )
     db.add(program)
     db.flush()  # get program.id before creating workouts

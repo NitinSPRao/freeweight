@@ -8,6 +8,7 @@ import NavBar from "@/components/NavBar";
 import apiClient from "@/lib/api-client";
 import { programApi, coachApi } from "@/lib/api-endpoints";
 import { getAuthData } from "@/lib/auth";
+import { extractErrorMessage } from "@/lib/utils";
 
 interface Athlete {
   id: number;
@@ -47,13 +48,14 @@ export default function CoachRosterPage() {
   const [assignSuccess, setAssignSuccess] = useState(false);
   const [manageError, setManageError] = useState<string | null>(null);
 
-  const { data: roster } = useQuery({
+  const { data: rosterData } = useQuery({
     queryKey: ["roster"],
     queryFn: async () => {
       const response = await apiClient.get<{ athletes: Athlete[] }>("/api/coaches/roster");
-      return response.data.athletes;
+      return response.data;
     },
   });
+  const roster = rosterData?.athletes;
 
   const { data: groups } = useQuery({
     queryKey: ["groups"],
@@ -95,7 +97,7 @@ export default function CoachRosterPage() {
       setManageError(null);
     },
     onError: (err: any) => {
-      setManageError(err?.response?.data?.detail ?? "Failed to add athlete.");
+      setManageError(extractErrorMessage(err, "Failed to add athlete."));
     },
   });
 
@@ -112,7 +114,7 @@ export default function CoachRosterPage() {
       setManageError(null);
     },
     onError: (err: any) => {
-      setManageError(err?.response?.data?.detail ?? "Failed to remove athlete.");
+      setManageError(extractErrorMessage(err, "Failed to remove athlete."));
     },
   });
 
@@ -124,7 +126,7 @@ export default function CoachRosterPage() {
       closeManagePanel();
     },
     onError: (err: any) => {
-      setManageError(err?.response?.data?.detail ?? "Failed to delete group.");
+      setManageError(extractErrorMessage(err, "Failed to delete group."));
     },
   });
 
@@ -141,7 +143,7 @@ export default function CoachRosterPage() {
       setAssignStartDate("");
     },
     onError: (err: any) => {
-      setManageError(err?.response?.data?.detail ?? "Failed to assign program.");
+      setManageError(extractErrorMessage(err, "Failed to assign program."));
     },
   });
 
