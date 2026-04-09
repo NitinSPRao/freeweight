@@ -45,6 +45,8 @@ export default function ImportProgramPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const programType = searchParams.get("type") === "rehab" ? "rehab" : "strength";
+  const folderIdParam = searchParams.get("folder_id");
+  const folderId = folderIdParam ? parseInt(folderIdParam) : null;
 
   // Keep the original File for the entire session so it can be re-sent on retry
   const fileRef = useRef<File | null>(null);
@@ -166,6 +168,7 @@ export default function ImportProgramPage() {
         body_regions: importProgramType === "rehab" && importBodyRegions.length > 0
           ? importBodyRegions
           : null,
+        folder_id: folderId,
       });
       router.push("/coach/programs");
     } catch (err: any) {

@@ -166,11 +166,14 @@ class Program(Base):
     archived = Column(Boolean, default=False, nullable=False)
     program_type = Column(String, nullable=False, server_default="strength")  # "strength" or "rehab"
     body_regions = Column(ARRAY(String), nullable=True)  # Only set when program_type == "rehab"
+    folder_id = Column(Integer, ForeignKey("folders.id"), nullable=True)
+    order = Column(Integer, nullable=False, server_default="0")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
     workouts = relationship("Workout", back_populates="program", cascade="all, delete-orphan")
     assignments = relationship("ProgramAssignment", back_populates="program", cascade="all, delete-orphan")
+    folder = relationship("Folder", back_populates="programs")
 
 class ProgramAssignment(Base):
     __tablename__ = "program_assignments"
@@ -284,6 +287,27 @@ class Notification(Base):
     athlete = relationship("User", foreign_keys=[athlete_id])
     workout_log = relationship("WorkoutLog")
     program = relationship("Program")
+
+
+class Folder(Base):
+    __tablename__ = "folders"
+
+    id = Column(Integer, primary_key=True, index=True)
+    coach_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    parent_id = Column(Integer, ForeignKey("folders.id"), nullable=True)
+    name = Column(String, nullable=False)
+    order = Column(Integer, nullable=False, default=0)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    coach = relationship("User", foreign_keys=[coach_id])
+    parent = relationship("Folder", remote_side="Folder.id",
+                          foreign_keys=[parent_id],
+                          back_populates="children")
+    children = relationship("Folder",
+                            foreign_keys=[parent_id],
+                            back_populates="parent",
+                            order_by="Folder.order")
+    programs = relationship("Program", back_populates="folder")
 
 
 class ExerciseCatalog(Base):

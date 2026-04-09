@@ -49,6 +49,7 @@ class ProgramCreate(BaseModel):
     description: Optional[str] = None
     program_type: Optional[str] = "strength"
     body_regions: Optional[List[str]] = None
+    folder_id: Optional[int] = None
 
 class ProgramResponse(BaseModel):
     id: int

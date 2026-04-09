@@ -103,6 +103,9 @@ export default function CreateProgramPage() {
   const [step, setStep] = useState(1);
   const [error, setError] = useState<string | null>(null);
 
+  const folderIdParam = searchParams.get("folder_id");
+  const folderId = folderIdParam ? parseInt(folderIdParam) : null;
+
   // Step 1: program info
   const [programName, setProgramName] = useState("");
   const [programDesc, setProgramDesc] = useState("");
@@ -145,6 +148,7 @@ export default function CreateProgramPage() {
       description: programDesc || undefined,
       program_type: programType,
       body_regions: programType === "rehab" ? selectedBodyRegions : null,
+      folder_id: folderId,
     }),
     onSuccess: (data) => {
       setProgramId(data.id);

@@ -73,6 +73,31 @@ export interface Program {
   workouts: Workout[];
   program_type: string;   // "strength" or "rehab"
   body_regions: string[] | null;
+  folder_id?: number | null;
+  order?: number;
+}
+
+export interface FolderContents {
+  id: number;
+  name: string;
+  parent_id: number | null;
+  order: number;
+  created_at: string;
+  subfolders: FolderContents[];
+  program_count: number;
+  archived_program_count: number;
+}
+
+export interface FolderBreadcrumb {
+  id: number;
+  name: string;
+}
+
+export interface FolderResponse {
+  folder: FolderContents | null;
+  breadcrumbs: FolderBreadcrumb[];
+  subfolders: FolderContents[];
+  programs: Program[];
 }
 
 export interface Notification {
@@ -487,7 +512,7 @@ export const programApi = {
     return response.data;
   },
 
-  create: async (data: { name: string; description?: string; program_type?: string; body_regions?: string[] | null }) => {
+  create: async (data: { name: string; description?: string; program_type?: string; body_regions?: string[] | null; folder_id?: number | null }) => {
     const response = await apiClient.post<Program>("/api/programs", data);
     return response.data;
   },
@@ -579,13 +604,21 @@ export const programApi = {
     return response.data;
   },
 
-  importProgram: async (data: ParsedProgram) => {
+  importProgram: async (data: ParsedProgram & { folder_id?: number | null }) => {
     const response = await apiClient.post<{
       program_id: number;
       program_name: string;
       workout_count: number;
       exercise_count: number;
     }>("/api/coaches/programs/import", data);
+    return response.data;
+  },
+
+  move: async (programId: number, folder_id: number | null) => {
+    const response = await apiClient.patch<Program>(
+      `/api/programs/${programId}/move`,
+      { folder_id }
+    );
     return response.data;
   },
 
@@ -596,6 +629,58 @@ export const programApi = {
     subgroup_id?: number;
   }) => {
     const response = await apiClient.post(`/api/programs/${programId}/assign`, data);
+    return response.data;
+  },
+};
+
+// ============================================================================
+// FOLDER API
+// ============================================================================
+
+export const folderApi = {
+  getRoot: async (): Promise<FolderResponse> => {
+    const response = await apiClient.get<FolderResponse>("/api/coaches/folders/root");
+    return response.data;
+  },
+
+  getFolder: async (folderId: number): Promise<FolderResponse> => {
+    const response = await apiClient.get<FolderResponse>(`/api/coaches/folders/${folderId}`);
+    return response.data;
+  },
+
+  create: async (data: { name: string; parent_id?: number | null }): Promise<FolderContents> => {
+    const response = await apiClient.post<FolderContents>("/api/coaches/folders", data);
+    return response.data;
+  },
+
+  rename: async (folderId: number, name: string): Promise<FolderContents> => {
+    const response = await apiClient.patch<FolderContents>(
+      `/api/coaches/folders/${folderId}`,
+      { name }
+    );
+    return response.data;
+  },
+
+  delete: async (folderId: number) => {
+    const response = await apiClient.delete(`/api/coaches/folders/${folderId}`);
+    return response.data;
+  },
+
+  archive: async (folderId: number) => {
+    const response = await apiClient.post(`/api/coaches/folders/${folderId}/archive`);
+    return response.data;
+  },
+
+  move: async (folderId: number, parent_id: number | null) => {
+    const response = await apiClient.patch<FolderContents>(
+      `/api/coaches/folders/${folderId}/move`,
+      { parent_id }
+    );
+    return response.data;
+  },
+
+  reorder: async (folders: { id: number; order: number }[]) => {
+    const response = await apiClient.patch("/api/coaches/folders/reorder", { folders });
     return response.data;
   },
 };

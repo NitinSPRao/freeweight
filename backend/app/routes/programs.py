@@ -1,10 +1,10 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from datetime import datetime, timedelta
-from typing import List
+from typing import List, Optional
 from ..database import get_db
 from ..auth import get_current_coach
-from ..models import User, Program, Workout, Exercise, ProgramAssignment, Group, Subgroup, WorkoutLog, SetLog
+from ..models import User, Program, Workout, Exercise, ProgramAssignment, Group, Subgroup, WorkoutLog, SetLog, Folder
 from ..schemas.program import (
     ProgramCreate,
     ProgramResponse,
@@ -14,6 +14,7 @@ from ..schemas.program import (
     ExerciseResponse,
     AssignmentCreate
 )
+from ..schemas.folder import ProgramMove
 
 router = APIRouter(prefix="/api/programs", tags=["programs"])
 
@@ -75,14 +76,22 @@ def list_archived_programs(
 
 @router.get("", response_model=List[ProgramResponse])
 def list_programs(
+    folder_id: Optional[str] = Query(default=None),
     current_coach: User = Depends(get_current_coach),
     db: Session = Depends(get_db)
 ):
-    programs = db.query(Program).filter(
-        Program.coach_id == current_coach.id,
-        Program.archived == False
-    ).order_by(Program.created_at.desc()).all()
+    query = db.query(Program).filter(Program.coach_id == current_coach.id)
 
+    if folder_id is not None and folder_id != "root":
+        try:
+            fid = int(folder_id)
+            query = query.filter(Program.folder_id == fid, Program.archived == False)
+        except ValueError:
+            query = query.filter(Program.archived == False)
+    else:
+        query = query.filter(Program.archived == False)
+
+    programs = query.order_by(Program.created_at.desc()).all()
     return [_serialize_program(p, include_workouts=False) for p in programs]
 
 
@@ -92,12 +101,27 @@ def create_program(
     current_coach: User = Depends(get_current_coach),
     db: Session = Depends(get_db)
 ):
+    if program_data.folder_id is not None:
+        folder = db.query(Folder).filter(
+            Folder.id == program_data.folder_id,
+            Folder.coach_id == current_coach.id
+        ).first()
+        if not folder:
+            raise HTTPException(status_code=404, detail="Folder not found")
+
+    order = db.query(Program).filter(
+        Program.coach_id == current_coach.id,
+        Program.folder_id == program_data.folder_id
+    ).count()
+
     new_program = Program(
         coach_id=current_coach.id,
         name=program_data.name,
         description=program_data.description,
         program_type=program_data.program_type or "strength",
         body_regions=program_data.body_regions,
+        folder_id=program_data.folder_id,
+        order=order,
     )
     db.add(new_program)
     db.commit()
@@ -453,6 +477,43 @@ def duplicate_program(
     db.commit()
 
     return {"program_id": new_program.id, "program_name": new_program.name}
+
+
+@router.patch("/{program_id}/move", response_model=ProgramResponse)
+def move_program(
+    program_id: int,
+    data: ProgramMove,
+    current_coach: User = Depends(get_current_coach),
+    db: Session = Depends(get_db)
+):
+    program = db.query(Program).filter(
+        Program.id == program_id,
+        Program.coach_id == current_coach.id
+    ).first()
+    if not program:
+        raise HTTPException(status_code=404, detail="Program not found")
+
+    if data.folder_id is not None:
+        folder = db.query(Folder).filter(
+            Folder.id == data.folder_id,
+            Folder.coach_id == current_coach.id
+        ).first()
+        if not folder:
+            raise HTTPException(status_code=404, detail="Folder not found")
+
+    # Order = count of programs already in the target location
+    order = db.query(Program).filter(
+        Program.folder_id == data.folder_id,
+        Program.coach_id == current_coach.id,
+        Program.id != program_id
+    ).count()
+
+    program.folder_id = data.folder_id
+    program.order = order
+    db.commit()
+    db.refresh(program)
+
+    return _serialize_program(program, include_workouts=False)
 
 
 @router.delete("/{program_id}")
