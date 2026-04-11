@@ -172,6 +172,7 @@ export interface Group {
   id: number;
   name: string;
   sport?: string;
+  invite_code?: string;
   member_count: number;
   subgroups: Subgroup[];
 }
@@ -342,6 +343,11 @@ export const athleteApi = {
 
   changeCoach: async (invite_code: string) => {
     const response = await apiClient.put("/api/athletes/coach", { invite_code });
+    return response.data;
+  },
+
+  joinGroup: async (invite_code: string) => {
+    const response = await apiClient.post("/api/athletes/join-group", { invite_code });
     return response.data;
   },
 

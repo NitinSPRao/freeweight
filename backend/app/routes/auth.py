@@ -3,7 +3,7 @@ from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from ..database import get_db
 from ..schemas.auth import SignupRequest, LoginRequest, TokenResponse, UserResponse
-from ..models import User, UserType
+from ..models import User, UserType, Group, group_members
 from ..auth import get_password_hash, verify_password, create_access_token, get_current_user
 import logging
 import random
@@ -68,16 +68,26 @@ def signup(request: SignupRequest, db: Session = Depends(get_db)):
             if not db.query(User).filter(User.invite_code == invite_code).first():
                 break
 
-    # Handle athlete invite code - find coach and connect
+    # Handle athlete invite code - resolve to coach code or group code
     coach = None
+    group_to_join = None
     if request.user_type == UserType.ATHLETE and request.invite_code:
-        coach = db.query(User).filter(User.invite_code == request.invite_code.upper()).first()
-        if not coach:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid invite code"
-            )
-        logger.info(f"🔗 Athlete signing up with coach: {coach.email}")
+        code = request.invite_code.upper()
+        # Try coach invite code first
+        coach = db.query(User).filter(User.invite_code == code).first()
+        if coach:
+            logger.info(f"🔗 Athlete signing up with coach invite code: {coach.email}")
+        else:
+            # Try group invite code
+            group_to_join = db.query(Group).filter(Group.invite_code == code).first()
+            if group_to_join:
+                coach = db.query(User).filter(User.id == group_to_join.coach_id).first()
+                logger.info(f"🔗 Athlete signing up with group invite code: group={group_to_join.name}, coach={coach.email}")
+            else:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Invalid invite code"
+                )
 
     new_user = User(
         email=request.email,
@@ -96,11 +106,17 @@ def signup(request: SignupRequest, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(new_user)
 
-    # Connect athlete to coach if invite code was used
+    # Connect athlete to coach (and optionally group) if invite code was used
     if coach:
         coach.coached_athletes.append(new_user)
         db.commit()
         logger.info(f"✅ Athlete {new_user.email} connected to coach {coach.email}")
+    if group_to_join:
+        db.refresh(group_to_join)
+        if new_user not in group_to_join.members:
+            group_to_join.members.append(new_user)
+            db.commit()
+        logger.info(f"✅ Athlete {new_user.email} auto-added to group {group_to_join.name}")
 
     access_token = create_access_token(data={"sub": new_user.id})
 
@@ -151,9 +167,9 @@ def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depend
         "user": user_dict
     }
 
-@router.get("/me", response_model=UserResponse)
+@router.get("/me")
 def get_me(current_user: User = Depends(get_current_user)):
-    return current_user
+    return _user_dict(current_user)
 
 @router.patch("/me")
 def update_profile(

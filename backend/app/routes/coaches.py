@@ -22,8 +22,22 @@ from ..schemas.coach import (
 from ..schemas.group import GroupCreate, SubgroupCreate
 from ..schemas.notifications import NotificationResponse
 from ..config import settings
+import random
+import string
 
 logger = logging.getLogger(__name__)
+
+
+def _generate_unique_group_code(db: Session) -> str:
+    """Generate a 6-char invite code that is unique across both the groups and users tables."""
+    while True:
+        code = ''.join(random.choices(string.ascii_uppercase + string.digits, k=6))
+        # Must not clash with any group invite code or any coach invite code
+        if (
+            not db.query(Group).filter(Group.invite_code == code).first()
+            and not db.query(User).filter(User.invite_code == code).first()
+        ):
+            return code
 
 router = APIRouter(prefix="/api/coaches", tags=["coaches"])
 
@@ -179,16 +193,24 @@ def create_group(
     current_coach: User = Depends(get_current_coach),
     db: Session = Depends(get_db)
 ):
-    new_group = Group(
-        coach_id=current_coach.id,
-        name=group_data.name,
-        sport=group_data.sport
-    )
-    db.add(new_group)
-    db.commit()
-    db.refresh(new_group)
+    try:
+        group_invite_code = _generate_unique_group_code(db)
 
-    return GroupBasic(id=new_group.id, name=new_group.name)
+        new_group = Group(
+            coach_id=current_coach.id,
+            name=group_data.name,
+            sport=group_data.sport,
+            invite_code=group_invite_code
+        )
+        db.add(new_group)
+        db.commit()
+        db.refresh(new_group)
+
+        return GroupBasic(id=new_group.id, name=new_group.name)
+    except Exception as e:
+        db.rollback()
+        logger.error(f"❌ Failed to create group: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to create group: {str(e)}")
 
 @router.post("/groups/{group_id}/subgroups", response_model=SubgroupBasic)
 def create_subgroup(
@@ -285,6 +307,7 @@ def get_groups(
         "id": g.id,
         "name": g.name,
         "sport": g.sport,
+        "invite_code": g.invite_code,
         "member_count": len(g.members),
         "subgroups": [{
             "id": s.id,
@@ -349,8 +372,14 @@ def get_onboarding_config(
     invite_code: str,
     db: Session = Depends(get_db)
 ):
-    """Public endpoint — returns onboarding config for a coach's invite code."""
-    coach = db.query(User).filter(User.invite_code == invite_code.upper()).first()
+    """Public endpoint — returns onboarding config for a coach or group invite code."""
+    code = invite_code.upper()
+    coach = db.query(User).filter(User.invite_code == code).first()
+    if not coach:
+        # Try group invite code
+        group = db.query(Group).filter(Group.invite_code == code).first()
+        if group:
+            coach = db.query(User).filter(User.id == group.coach_id).first()
     if not coach:
         raise HTTPException(status_code=404, detail="Invalid invite code")
 

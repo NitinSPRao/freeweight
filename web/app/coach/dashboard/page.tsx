@@ -18,7 +18,12 @@ export default function CoachDashboardPage() {
     queryFn: () => coachApi.getDashboard(),
   });
 
-  const inviteCode = user?.invite_code;
+  const { data: inviteCodeData } = useQuery({
+    queryKey: ["coachInviteCode"],
+    queryFn: () => coachApi.getInviteCode(),
+  });
+
+  const inviteCode = inviteCodeData?.invite_code || user?.invite_code;
 
   const copyInviteCode = () => {
     if (inviteCode) {

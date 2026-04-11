@@ -566,6 +566,40 @@ def join_coach(
     return {"message": f"Connected to coach {coach.name}", "coach_name": coach.name, "coach_id": coach.id}
 
 
+# ─── Join Group ───────────────────────────────────────────────────────────────
+
+@router.post("/join-group")
+def join_group(
+    data: dict,
+    current_athlete: models.User = Depends(get_current_athlete),
+    db: Session = Depends(get_db)
+):
+    """Join a group using its invite code. Athlete must already belong to the group's coach."""
+    invite_code = (data.get("invite_code") or "").upper()
+    if not invite_code:
+        raise HTTPException(status_code=400, detail="invite_code is required")
+
+    group = db.query(models.Group).filter(models.Group.invite_code == invite_code).first()
+    if not group:
+        raise HTTPException(status_code=400, detail="Invalid group invite code")
+
+    # Validate the athlete belongs to the same coach as the group
+    coach = db.query(models.User).filter(models.User.id == group.coach_id).first()
+    if not coach or current_athlete not in coach.coached_athletes:
+        raise HTTPException(
+            status_code=403,
+            detail="You are not on this coach's roster. Join the coach first."
+        )
+
+    if current_athlete in group.members:
+        raise HTTPException(status_code=409, detail="Already a member of this group")
+
+    group.members.append(current_athlete)
+    db.commit()
+
+    return {"message": f"Joined group {group.name}", "group_name": group.name, "group_id": group.id}
+
+
 # ─── Calendar ─────────────────────────────────────────────────────────────────
 
 @router.get("/calendar", response_model=list[CalendarWorkout])

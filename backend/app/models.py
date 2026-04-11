@@ -138,6 +138,7 @@ class Group(Base):
     coach_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     name = Column(String, nullable=False)
     sport = Column(String, nullable=True)
+    invite_code = Column(String(6), unique=True, nullable=True, index=True)  # 6-char group invite code
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     coach = relationship("User", back_populates="groups_owned")
