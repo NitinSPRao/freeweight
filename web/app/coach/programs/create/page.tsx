@@ -24,22 +24,6 @@ interface ExerciseDraft {
   coach_notes: string;
 }
 
-// ─── Body region constants ────────────────────────────────────────────────────
-
-const BODY_REGION_LABELS: Record<string, string> = {
-  neck_upper_back: "Neck & Upper Back",
-  shoulder: "Shoulder",
-  elbow_wrist: "Elbow & Wrist",
-  core_ribs: "Core & Ribs",
-  lower_back: "Lower Back",
-  hip: "Hip",
-  knee: "Knee",
-  lower_leg_shin: "Lower Leg & Shin",
-  ankle_foot: "Ankle & Foot",
-};
-
-const ALL_BODY_REGIONS = Object.keys(BODY_REGION_LABELS);
-
 // ─── Step indicators ─────────────────────────────────────────────────────────
 
 const STEPS = [
@@ -112,16 +96,6 @@ export default function CreateProgramPage() {
   const [programType, setProgramType] = useState<"strength" | "rehab">(
     searchParams.get("type") === "rehab" ? "rehab" : "strength"
   );
-  const [selectedBodyRegions, setSelectedBodyRegions] = useState<string[]>(() => {
-    const region = searchParams.get("body_region");
-    return region && BODY_REGION_LABELS[region] ? [region] : [];
-  });
-
-  const toggleBodyRegion = (region: string) =>
-    setSelectedBodyRegions((prev) =>
-      prev.includes(region) ? prev.filter((r) => r !== region) : [...prev, region]
-    );
-
   // Created program ID (set after step 1 mutation)
   const [programId, setProgramId] = useState<number | null>(null);
 
@@ -147,7 +121,6 @@ export default function CreateProgramPage() {
       name: programName,
       description: programDesc || undefined,
       program_type: programType,
-      body_regions: programType === "rehab" ? selectedBodyRegions : null,
       folder_id: folderId,
     }),
     onSuccess: (data) => {
@@ -330,13 +303,16 @@ export default function CreateProgramPage() {
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-medium text-text mb-2">Description</label>
+                  <label className="block text-sm font-medium text-text mb-2">Description & When to Use</label>
                   <textarea
                     value={programDesc}
                     onChange={(e) => setProgramDesc(e.target.value)}
                     className="input-field min-h-[100px]"
-                    placeholder="Optional — describe the program focus, goals, etc."
+                    placeholder="e.g. For athletes experiencing anterior knee pain or patellar tendinopathy. Use when an athlete reports knee discomfort during loading phases, squatting, or landing. Avoid if acute swelling is present."
                   />
+                  <p className="mt-1.5 text-xs text-secondary">
+                    For rehab programs: describe symptoms and situations where this plan is appropriate. This helps match the right program to injured athletes automatically.
+                  </p>
                 </div>
 
                 {/* Program type toggle */}
@@ -368,34 +344,6 @@ export default function CreateProgramPage() {
                   </div>
                 </div>
 
-                {/* Body regions — only shown for rehab programs */}
-                {programType === "rehab" && (
-                  <div>
-                    <label className="block text-sm font-medium text-text mb-2">
-                      Target Body Regions
-                      <span className="text-secondary font-normal ml-1">(select all that apply)</span>
-                    </label>
-                    <div className="flex flex-wrap gap-2">
-                      {ALL_BODY_REGIONS.map((region) => {
-                        const selected = selectedBodyRegions.includes(region);
-                        return (
-                          <button
-                            key={region}
-                            type="button"
-                            onClick={() => toggleBodyRegion(region)}
-                            className={`text-sm px-3 py-1.5 rounded-full border transition-colors ${
-                              selected
-                                ? "bg-amber-400/20 border-amber-400 text-amber-400"
-                                : "bg-background border-secondary/30 text-secondary hover:border-secondary/60"
-                            }`}
-                          >
-                            {BODY_REGION_LABELS[region]}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
               </div>
               <div className="mt-8 flex justify-end">
                 <button

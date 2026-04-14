@@ -4,10 +4,13 @@ from sqlalchemy import and_
 from datetime import datetime, date, timedelta, timezone
 from typing import Optional
 import base64
+import json
 import logging
+from google import genai
 from ..database import get_db
 from ..auth import get_current_athlete
 from .. import models
+from ..config import settings
 
 logger = logging.getLogger(__name__)
 from ..schemas.athlete import (
@@ -17,6 +20,7 @@ from ..schemas.athlete import (
     GenerateProgramRequest, CreateWorkoutRequest, CopyWorkoutRequest
 )
 from ..schemas.workout import WorkoutResponse, ExerciseResponse, SetLogCreate, WorkoutComplete, FlagRequest, WorkoutLogResponse, WorkoutEdit
+from .programs import _materialize_program_for_athlete
 
 router = APIRouter(prefix="/api/athletes", tags=["athletes"])
 
@@ -959,6 +963,7 @@ def flag_workout(
             flag_reason=data.reason,
             body_region=data.body_region,
             body_region_detail=data.body_region_detail,
+            rehab_target=data.rehab_target,
         )
         db.add(workout_log)
         db.flush()  # get workout_log.id for notification FK before commit
@@ -967,84 +972,239 @@ def flag_workout(
         workout_log.flag_reason = data.reason
         workout_log.body_region = data.body_region
         workout_log.body_region_detail = data.body_region_detail
+        workout_log.rehab_target = data.rehab_target
 
     # ─── Notification & rehab assignment (side effect — must not block flag) ──
+    match_result = {
+        "flagged": True,
+        "matched": False,
+        "program_name": None,
+        "confidence": None,
+    }
     try:
         coach = current_athlete.coaches[0] if current_athlete.coaches else None
         if coach:
-            if data.body_region:
-                region_label = models.BODY_REGION_LABELS.get(data.body_region, data.body_region)
+            if data.opt_in_rehab:
+                # ── Gemini semantic matching ──────────────────────────────────
+                programs = db.query(models.Program).filter(
+                    models.Program.coach_id == coach.id,
+                    models.Program.program_type == "rehab",
+                    models.Program.archived == False,
+                ).all()
 
-                if data.opt_in_rehab:
-                    # Auto-assign matching rehab program and notify coach
-                    matching = db.query(models.Program).filter(
-                        models.Program.coach_id == coach.id,
-                        models.Program.program_type == "rehab",
-                        models.Program.body_regions.contains([data.body_region]),
-                        models.Program.archived == False,
-                    ).all()
-
-                    if matching:
-                        # Most overlap with the flagged region; break ties by newest
-                        best = max(
-                            matching,
-                            key=lambda p: (
-                                len(set(p.body_regions or []) & {data.body_region}),
-                                p.created_at,
-                            ),
-                        )
-                        db.add(models.ProgramAssignment(
-                            program_id=best.id,
-                            athlete_id=current_athlete.id,
-                            start_date=datetime.now(timezone.utc),
-                        ))
-                        db.add(models.Notification(
-                            coach_id=coach.id,
-                            athlete_id=current_athlete.id,
-                            workout_log_id=workout_log.id,
-                            program_id=best.id,
-                            notification_type="rehab_assigned",
-                            message=(
-                                f"{current_athlete.name} flagged a {region_label} injury — "
-                                f"'{best.name}' was automatically assigned."
-                            ),
-                            is_read=False,
-                        ))
-                    else:
-                        db.add(models.Notification(
-                            coach_id=coach.id,
-                            athlete_id=current_athlete.id,
-                            workout_log_id=workout_log.id,
-                            program_id=None,
-                            notification_type="injury_no_rehab",
-                            message=(
-                                f"{current_athlete.name} flagged a {region_label} injury — "
-                                f"no matching rehab program found. "
-                                f"Assign an existing program or create a new one."
-                            ),
-                            is_read=False,
-                        ))
-                else:
-                    # Athlete did not opt in to rehab — notify coach without auto-assigning
+                if not programs:
                     db.add(models.Notification(
                         coach_id=coach.id,
                         athlete_id=current_athlete.id,
                         workout_log_id=workout_log.id,
                         program_id=None,
                         notification_type="injury_no_rehab",
+                        confidence=None,
+                        candidate_programs=None,
                         message=(
-                            f"{current_athlete.name} flagged a {region_label} issue "
-                            f"but did not request a rehab program."
+                            f"No rehab programs are available in your library. "
+                            f"Please create a rehab program and assign it to "
+                            f"{current_athlete.name} manually."
                         ),
                         is_read=False,
                     ))
-            else:
+                else:
+                    athlete_description = data.rehab_target or data.reason
+
+                    system_instruction = (
+                        "You are a sports medicine assistant helping match an injured "
+                        "athlete to the most appropriate rehab program from a coach's "
+                        "library. Analyze the athlete's description and each program's "
+                        "name and description to find the best match.\n\n"
+                        "Return ONLY valid JSON. No markdown, no backticks, no preamble. "
+                        "First character must be '{'."
+                    )
+                    program_lines = "\n".join(
+                        f"ID: {p.id} | Name: {p.name} | Description: {p.description or 'No description provided'}"
+                        for p in programs
+                    )
+                    user_message = (
+                        f'Athlete\'s rehab target: "{athlete_description}"\n\n'
+                        f"Available rehab programs:\n{program_lines}\n\n"
+                        "Analyze each program and return:\n"
+                        "{\n"
+                        '  "best_match_id": integer or null,\n'
+                        '  "confidence": "high" or "medium" or "low",\n'
+                        '  "reasoning": "one sentence explanation",\n'
+                        '  "candidate_ids": [list of program ids that were ambiguous — only for medium confidence, empty list otherwise]\n'
+                        "}\n\n"
+                        "Confidence rules:\n"
+                        '- "high": one program clearly fits better than all others, even if the match is not word-for-word perfect. A partial match is still high confidence if no other program competes.\n'
+                        '- "medium": two or more programs could reasonably fit and it is genuinely unclear which is better.\n'
+                        '- "low": the description does not meaningfully relate to any available program, or is too vague to interpret.\n\n'
+                        "If confidence is low, set best_match_id to null."
+                    )
+
+                    matched_result = None
+                    try:
+                        client = genai.Client(api_key=settings.gemini_api_key)
+                        response = client.models.generate_content(
+                            model="gemini-2.5-flash-lite",
+                            contents=user_message,
+                            config={"system_instruction": system_instruction},
+                        )
+                        raw = response.text.strip()
+                        # Strip markdown fences if present
+                        if raw.startswith("```"):
+                            raw = raw.split("```")[1]
+                            if raw.startswith("json"):
+                                raw = raw[4:]
+                        matched_result = json.loads(raw)
+                    except Exception as gemini_err:
+                        logger.error("Gemini matching failed: %s", gemini_err)
+
+                    if matched_result is None:
+                        db.add(models.Notification(
+                            coach_id=coach.id,
+                            athlete_id=current_athlete.id,
+                            workout_log_id=workout_log.id,
+                            program_id=None,
+                            notification_type="injury_no_rehab",
+                            confidence=None,
+                            candidate_programs=None,
+                            message=(
+                                f"Matching service unavailable — please assign a rehab "
+                                f"program to {current_athlete.name} manually."
+                            ),
+                            is_read=False,
+                        ))
+                    else:
+                        confidence = matched_result.get("confidence", "low")
+                        best_match_id = matched_result.get("best_match_id")
+                        candidate_ids = matched_result.get("candidate_ids", [])
+
+                        if confidence in ("high", "medium") and best_match_id is not None:
+                            matched_program = db.query(models.Program).filter(
+                                models.Program.id == best_match_id
+                            ).first()
+
+                            if matched_program:
+                                _materialize_program_for_athlete(
+                                    db=db,
+                                    program_id=matched_program.id,
+                                    athlete_id=current_athlete.id,
+                                    start_date=datetime.now(timezone.utc),
+                                )
+
+                                if confidence == "high":
+                                    match_result["matched"] = True
+                                    match_result["program_name"] = matched_program.name
+                                    match_result["confidence"] = "high"
+                                    db.add(models.Notification(
+                                        coach_id=coach.id,
+                                        athlete_id=current_athlete.id,
+                                        workout_log_id=workout_log.id,
+                                        program_id=matched_program.id,
+                                        notification_type="rehab_assigned",
+                                        confidence="high",
+                                        candidate_programs=[],
+                                        message=(
+                                            f"{current_athlete.name} requested a rehab plan targeting "
+                                            f"'{athlete_description}'. "
+                                            f"'{matched_program.name}' was automatically assigned."
+                                        ),
+                                        is_read=False,
+                                    ))
+                                else:  # medium
+                                    match_result["matched"] = True
+                                    match_result["program_name"] = matched_program.name
+                                    match_result["confidence"] = "medium"
+                                    candidate_program_names: list[str] = []
+                                    if candidate_ids:
+                                        candidate_objs = db.query(models.Program).filter(
+                                            models.Program.id.in_(candidate_ids)
+                                        ).all()
+                                        candidate_program_names = [p.name for p in candidate_objs]
+
+                                    db.add(models.Notification(
+                                        coach_id=coach.id,
+                                        athlete_id=current_athlete.id,
+                                        workout_log_id=workout_log.id,
+                                        program_id=matched_program.id,
+                                        notification_type="rehab_assigned_review",
+                                        confidence="medium",
+                                        candidate_programs=candidate_program_names,
+                                        message=(
+                                            f"{current_athlete.name} requested a rehab plan targeting "
+                                            f"'{athlete_description}'. "
+                                            f"'{matched_program.name}' was assigned as the closest match. "
+                                            f"Other possible matches: "
+                                            f"{', '.join(candidate_program_names)}. "
+                                            f"Review and reassign if needed."
+                                        ),
+                                        is_read=False,
+                                    ))
+                            else:
+                                # best_match_id didn't resolve to a real program
+                                match_result["confidence"] = "low"
+                                db.add(models.Notification(
+                                    coach_id=coach.id,
+                                    athlete_id=current_athlete.id,
+                                    workout_log_id=workout_log.id,
+                                    program_id=None,
+                                    notification_type="injury_no_rehab",
+                                    confidence="low",
+                                    candidate_programs=[],
+                                    message=(
+                                        f"{current_athlete.name} requested a rehab plan targeting "
+                                        f"'{athlete_description}'. "
+                                        f"A confident match could not be found. "
+                                        f"Please assign a program manually."
+                                    ),
+                                    is_read=False,
+                                ))
+                        else:
+                            # low confidence or null best_match_id
+                            match_result["confidence"] = "low"
+                            db.add(models.Notification(
+                                coach_id=coach.id,
+                                athlete_id=current_athlete.id,
+                                workout_log_id=workout_log.id,
+                                program_id=None,
+                                notification_type="injury_no_rehab",
+                                confidence="low",
+                                candidate_programs=[],
+                                message=(
+                                    f"{current_athlete.name} requested a rehab plan targeting "
+                                    f"'{athlete_description}'. "
+                                    f"A confident match could not be found. "
+                                    f"Please assign a program manually."
+                                ),
+                                is_read=False,
+                            ))
+
+            elif data.body_region:
+                # Athlete flagged a body region but did not opt in to rehab
+                region_label = models.BODY_REGION_LABELS.get(data.body_region, data.body_region)
                 db.add(models.Notification(
                     coach_id=coach.id,
                     athlete_id=current_athlete.id,
                     workout_log_id=workout_log.id,
                     program_id=None,
                     notification_type="injury_no_rehab",
+                    confidence=None,
+                    candidate_programs=None,
+                    message=(
+                        f"{current_athlete.name} flagged a {region_label} issue "
+                        f"but did not request a rehab program."
+                    ),
+                    is_read=False,
+                ))
+            else:
+                # No body region and no opt-in
+                db.add(models.Notification(
+                    coach_id=coach.id,
+                    athlete_id=current_athlete.id,
+                    workout_log_id=workout_log.id,
+                    program_id=None,
+                    notification_type="injury_no_rehab",
+                    confidence=None,
+                    candidate_programs=None,
                     message=(
                         f"{current_athlete.name} flagged a workout "
                         f"but did not specify a body region. "
@@ -1059,7 +1219,7 @@ def flag_workout(
         )
 
     db.commit()
-    return {"message": "Workout flagged successfully"}
+    return match_result
 
 
 # ─── History & Progress ───────────────────────────────────────────────────────

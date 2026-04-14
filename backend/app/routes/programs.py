@@ -19,6 +19,59 @@ from ..schemas.folder import ProgramMove
 router = APIRouter(prefix="/api/programs", tags=["programs"])
 
 
+def _materialize_program_for_athlete(
+    db: Session,
+    program_id: int,
+    athlete_id: int,
+    start_date: datetime,
+) -> None:
+    """
+    Copies all template workouts and exercises from a program
+    into concrete Workout/Exercise rows for a specific athlete.
+    Creates a ProgramAssignment record.
+    Does NOT commit — caller is responsible for db.commit().
+    """
+    program = db.query(Program).filter(Program.id == program_id).first()
+    if not program:
+        return
+
+    template_workouts = [w for w in program.workouts if w.athlete_id is None]
+
+    for template in template_workouts:
+        day_offset = template.day_offset or 0
+        scheduled_date = start_date + timedelta(days=day_offset)
+
+        concrete_workout = Workout(
+            program_id=program_id,
+            athlete_id=athlete_id,
+            name=template.name,
+            description=template.description,
+            scheduled_date=scheduled_date,
+            day_offset=day_offset,
+        )
+        db.add(concrete_workout)
+        db.flush()  # populate concrete_workout.id
+
+        for template_exercise in sorted(template.exercises, key=lambda e: e.order):
+            db.add(Exercise(
+                workout_id=concrete_workout.id,
+                name=template_exercise.name,
+                sets=template_exercise.sets,
+                reps=template_exercise.reps,
+                percentage_of_max=template_exercise.percentage_of_max,
+                target_exercise=template_exercise.target_exercise,
+                video_url=template_exercise.video_url,
+                coach_notes=template_exercise.coach_notes,
+                order=template_exercise.order,
+            ))
+
+    db.add(ProgramAssignment(
+        program_id=program_id,
+        athlete_id=athlete_id,
+        start_date=start_date,
+    ))
+
+
 def _serialize_program(program: Program, include_workouts: bool = True) -> ProgramResponse:
     workouts = []
     if include_workouts:
@@ -327,50 +380,17 @@ def assign_program(
 
     athletes = list(athletes_by_id.values())
 
-    # Template workouts are those where athlete_id is NULL (created by the coach).
+    # Template workouts are those where athlete_id is NULL — used only for the count.
     template_workouts = [w for w in program.workouts if w.athlete_id is None]
 
-    start_date = assignment_data.start_date
-
-    # Materialize concrete workout + exercise copies for each athlete.
     for athlete in athletes:
-        for template in template_workouts:
-            day_offset = template.day_offset or 0
-            scheduled_date = start_date + timedelta(days=day_offset)
+        _materialize_program_for_athlete(
+            db=db,
+            program_id=program_id,
+            athlete_id=athlete.id,
+            start_date=assignment_data.start_date,
+        )
 
-            concrete_workout = Workout(
-                program_id=program_id,
-                athlete_id=athlete.id,
-                name=template.name,
-                description=template.description,
-                scheduled_date=scheduled_date,
-                day_offset=day_offset
-            )
-            db.add(concrete_workout)
-            db.flush()  # populate concrete_workout.id
-
-            for template_exercise in sorted(template.exercises, key=lambda e: e.order):
-                db.add(Exercise(
-                    workout_id=concrete_workout.id,
-                    name=template_exercise.name,
-                    sets=template_exercise.sets,
-                    reps=template_exercise.reps,
-                    percentage_of_max=template_exercise.percentage_of_max,
-                    target_exercise=template_exercise.target_exercise,
-                    video_url=template_exercise.video_url,
-                    coach_notes=template_exercise.coach_notes,
-                    order=template_exercise.order
-                ))
-
-    # Record the assignment.
-    assignment = ProgramAssignment(
-        program_id=program_id,
-        athlete_id=assignment_data.athlete_id,
-        group_id=assignment_data.group_id,
-        subgroup_id=assignment_data.subgroup_id,
-        start_date=start_date
-    )
-    db.add(assignment)
     db.commit()
 
     return {

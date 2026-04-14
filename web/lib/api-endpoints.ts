@@ -28,6 +28,13 @@ export interface ParsedProgram {
   body_regions?: string[] | null;
 }
 
+export interface FlagResult {
+  flagged: boolean
+  matched: boolean
+  program_name: string | null
+  confidence: string | null
+}
+
 export interface AthleteMax {
   id: number;
   exercise_name: string;
@@ -108,11 +115,13 @@ export interface Notification {
   program_id: number | null;
   program_name: string | null;
   message: string;
-  notification_type: "rehab_assigned" | "injury_no_rehab";
+  notification_type: "rehab_assigned" | "rehab_assigned_review" | "injury_no_rehab";
   is_read: boolean;
   created_at: string;
   body_region: string | null;
   body_region_detail: string | null;
+  confidence: string | null;
+  candidate_programs: string[] | null;
 }
 
 export interface WorkoutLog {
@@ -303,12 +312,11 @@ export const athleteApi = {
     workoutId: number,
     data: {
       reason: string;
-      body_region?: string | null;
-      body_region_detail?: string | null;
       opt_in_rehab?: boolean;
+      rehab_target?: string | null;
     }
-  ) => {
-    const response = await apiClient.post(
+  ): Promise<FlagResult> => {
+    const response = await apiClient.post<FlagResult>(
       `/api/athletes/workouts/${workoutId}/flag`,
       data
     );
@@ -462,6 +470,21 @@ export const coachApi = {
     return response.data;
   },
 
+  getRehabPrograms: async () => {
+    const response = await apiClient.get<{ id: number; name: string; description: string }[]>(
+      "/api/coaches/rehab-programs"
+    );
+    return response.data;
+  },
+
+  reassignRehab: async (notificationId: number, newProgramId: number) => {
+    const response = await apiClient.patch(
+      `/api/coaches/notifications/${notificationId}/reassign`,
+      { new_program_id: newProgramId }
+    );
+    return response.data;
+  },
+
   // Subgroup Management
   createSubgroup: async (groupId: number, name: string, training_focus?: string) => {
     const response = await apiClient.post(`/api/coaches/groups/${groupId}/subgroups`, {
@@ -518,7 +541,7 @@ export const programApi = {
     return response.data;
   },
 
-  create: async (data: { name: string; description?: string; program_type?: string; body_regions?: string[] | null; folder_id?: number | null }) => {
+  create: async (data: { name: string; description?: string; program_type?: string; folder_id?: number | null }) => {
     const response = await apiClient.post<Program>("/api/programs", data);
     return response.data;
   },

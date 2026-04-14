@@ -93,6 +93,9 @@ function relativeTime(dateStr: string): string {
 function NotificationBell() {
   const queryClient = useQueryClient();
   const [isOpen, setIsOpen] = useState(false);
+  const [reassignMenuId, setReassignMenuId] = useState<number | null>(null);
+  const [rehabPrograms, setRehabPrograms] = useState<{ id: number; name: string; description: string }[]>([]);
+  const [rehabProgramsLoading, setRehabProgramsLoading] = useState(false);
 
   const { data: countData } = useQuery({
     queryKey: ["notifications-unread-count"],
@@ -132,6 +135,28 @@ function NotificationBell() {
     document.addEventListener("mousedown", handleClick);
     return () => document.removeEventListener("mousedown", handleClick);
   }, [isOpen]);
+
+  useEffect(() => {
+    if (!isOpen) {
+      setReassignMenuId(null);
+    }
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (reassignMenuId !== null) {
+      setRehabProgramsLoading(true);
+      coachApi.getRehabPrograms()
+        .then(setRehabPrograms)
+        .finally(() => setRehabProgramsLoading(false));
+    }
+  }, [reassignMenuId]);
+
+  const handleReassign = async (notificationId: number, newProgramId: number) => {
+    await coachApi.reassignRehab(notificationId, newProgramId);
+    setReassignMenuId(null);
+    queryClient.invalidateQueries({ queryKey: ["notifications"] });
+    queryClient.invalidateQueries({ queryKey: ["unread-notifications"] });
+  };
 
   const unreadCount = countData?.count ?? 0;
   const badgeLabel = unreadCount > 9 ? "9+" : String(unreadCount);
@@ -199,6 +224,16 @@ function NotificationBell() {
               >
                 <p className="font-bold text-text text-sm">{n.athlete_name}</p>
                 <p className="text-secondary text-xs mt-1 leading-relaxed">{n.message}</p>
+
+                {/* "Also considered" programs — only for rehab_assigned_review */}
+                {n.notification_type === "rehab_assigned_review" &&
+                  n.candidate_programs &&
+                  n.candidate_programs.length > 0 && (
+                    <p className="text-zinc-500 text-xs mt-1 leading-relaxed">
+                      Also considered: {n.candidate_programs.join(", ")}
+                    </p>
+                  )}
+
                 <p className="text-zinc-500 text-xs mt-1.5">{relativeTime(n.created_at)}</p>
 
                 {/* Action buttons — stop propagation so they don't trigger mark-read */}
@@ -206,14 +241,27 @@ function NotificationBell() {
                   className="mt-2.5 flex gap-2 flex-wrap"
                   onClick={(e) => e.stopPropagation()}
                 >
-                  {n.notification_type === "rehab_assigned" && (
-                    <Link
-                      href={`/coach/athletes/${n.athlete_id}`}
-                      className="text-xs text-primary hover:underline font-medium"
-                      onClick={() => setIsOpen(false)}
-                    >
-                      View Athlete →
-                    </Link>
+                  {(n.notification_type === "rehab_assigned" ||
+                    n.notification_type === "rehab_assigned_review") && (
+                    <>
+                      <Link
+                        href={`/coach/athletes/${n.athlete_id}`}
+                        className="text-xs text-primary hover:underline font-medium"
+                        onClick={() => setIsOpen(false)}
+                      >
+                        View Athlete →
+                      </Link>
+                      <button
+                        className="text-xs px-2.5 py-1 rounded border border-zinc-600 text-secondary hover:text-text hover:border-zinc-500 transition-colors font-medium"
+                        onClick={() =>
+                          setReassignMenuId(
+                            reassignMenuId === n.id ? null : n.id
+                          )
+                        }
+                      >
+                        Change Program
+                      </button>
+                    </>
                   )}
                   {n.notification_type === "injury_no_rehab" && (
                     <>
@@ -234,6 +282,50 @@ function NotificationBell() {
                     </>
                   )}
                 </div>
+
+                {/* Change Program picker */}
+                {reassignMenuId === n.id && (
+                  <div
+                    className="mt-2.5 bg-zinc-950 border border-zinc-700 rounded-lg p-3"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <p className="text-zinc-500 text-xs mb-2">Select a program</p>
+                    {rehabProgramsLoading ? (
+                      <p className="text-zinc-500 text-xs">Loading...</p>
+                    ) : rehabPrograms.length === 0 ? (
+                      <p className="text-zinc-500 text-xs">No rehab programs available</p>
+                    ) : (
+                      <div className="flex flex-col gap-1">
+                        {rehabPrograms.map((program) => (
+                          <button
+                            key={program.id}
+                            className={[
+                              "text-left px-2.5 py-2 rounded-md hover:bg-zinc-800 transition-colors",
+                              n.program_id === program.id
+                                ? "ring-1 ring-primary/40 bg-zinc-800/60"
+                                : "",
+                            ].join(" ")}
+                            onClick={() => handleReassign(n.id, program.id)}
+                          >
+                            <p className="text-text text-xs font-bold">{program.name}</p>
+                            {program.description && (
+                              <p className="text-zinc-500 text-xs mt-0.5 leading-relaxed">
+                                {program.description.slice(0, 60)}
+                                {program.description.length > 60 ? "…" : ""}
+                              </p>
+                            )}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                    <button
+                      className="mt-2 text-xs text-zinc-500 hover:text-secondary transition-colors"
+                      onClick={() => setReassignMenuId(null)}
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                )}
               </div>
             ))
           )}

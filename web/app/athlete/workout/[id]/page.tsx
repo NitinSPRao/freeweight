@@ -6,7 +6,7 @@ import { useState, useCallback } from "react";
 import AuthGuard from "@/components/AuthGuard";
 import NavBar from "@/components/NavBar";
 import RestTimer from "@/components/RestTimer";
-import { athleteApi, Exercise } from "@/lib/api-endpoints";
+import { athleteApi, Exercise, FlagResult } from "@/lib/api-endpoints";
 import { getAuthData } from "@/lib/auth";
 import { calculateTargetWeight } from "@/lib/utils";
 
@@ -32,9 +32,10 @@ export default function WorkoutPage() {
   const [showCustomInput, setShowCustomInput] = useState(false);
   const [showFlagModal, setShowFlagModal] = useState(false);
   const [flagReason, setFlagReason] = useState("");
-  const [flagBodyRegion, setFlagBodyRegion] = useState<string | null>(null);
-  const [flagBodyRegionDetail, setFlagBodyRegionDetail] = useState("");
   const [flagOptInRehab, setFlagOptInRehab] = useState(false);
+  const [flagRehabTarget, setFlagRehabTarget] = useState("");
+  const [flagSubmitted, setFlagSubmitted] = useState(false);
+  const [flagResult, setFlagResult] = useState<FlagResult | null>(null);
   const [completionNotes, setCompletionNotes] = useState("");
   const [showCompletionModal, setShowCompletionModal] = useState(false);
   const [workoutStarted, setWorkoutStarted] = useState(false);
@@ -79,11 +80,13 @@ export default function WorkoutPage() {
   const flagWorkoutMutation = useMutation({
     mutationFn: (data: {
       reason: string;
-      body_region?: string | null;
-      body_region_detail?: string | null;
       opt_in_rehab?: boolean;
+      rehab_target?: string | null;
     }) => athleteApi.flagWorkout(workoutId, data),
-    onSuccess: () => router.push("/athlete/home"),
+    onSuccess: (data: FlagResult) => {
+      setFlagResult(data);
+      setFlagSubmitted(true);
+    },
   });
 
   const exercises = workout?.exercises || [];
@@ -268,8 +271,13 @@ export default function WorkoutPage() {
               </div>
               <button
                 onClick={() => setShowFlagModal(true)}
-                className="text-error hover:underline text-sm"
+                className="flex items-center gap-1.5 border border-red-400 text-red-400 rounded-lg px-3 py-1 text-sm hover:bg-red-400/10 transition-colors"
               >
+                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                  <line x1="12" y1="9" x2="12" y2="13"/>
+                  <line x1="12" y1="17" x2="12.01" y2="17"/>
+                </svg>
                 Flag
               </button>
             </div>
@@ -466,125 +474,131 @@ export default function WorkoutPage() {
 
         {/* Flag Modal */}
         {showFlagModal && (() => {
-          const BODY_REGIONS = [
-            { key: "neck_upper_back", label: "Neck & Upper Back", detail_placeholder: "e.g. upper trap tightness" },
-            { key: "shoulder", label: "Shoulder", detail_placeholder: "e.g. rotator cuff, AC joint" },
-            { key: "elbow_wrist", label: "Elbow & Wrist", detail_placeholder: "e.g. tennis elbow, wrist pain" },
-            { key: "core_ribs", label: "Core & Ribs", detail_placeholder: "e.g. rib stress fracture, oblique strain" },
-            { key: "lower_back", label: "Lower Back", detail_placeholder: "e.g. disc pain, SI joint" },
-            { key: "hip", label: "Hip", detail_placeholder: "e.g. hip flexor, labrum" },
-            { key: "knee", label: "Knee", detail_placeholder: "e.g. IT band, ACL, patellar tendon" },
-            { key: "lower_leg_shin", label: "Lower Leg & Shin", detail_placeholder: "e.g. shin splints, stress fracture" },
-            { key: "ankle_foot", label: "Ankle & Foot", detail_placeholder: "e.g. achilles, ankle sprain" },
-          ];
-
           const closeFlagModal = () => {
             setShowFlagModal(false);
             setFlagReason("");
-            setFlagBodyRegion(null);
-            setFlagBodyRegionDetail("");
             setFlagOptInRehab(false);
+            setFlagRehabTarget("");
+            setFlagSubmitted(false);
+            setFlagResult(null);
           };
-
-          const selectedRegion = BODY_REGIONS.find((r) => r.key === flagBodyRegion);
 
           return (
             <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
               <div className="bg-[#1F2937] rounded-lg p-6 max-w-md w-full max-h-[90vh] overflow-y-auto">
-                <h3 className="text-xl font-heading font-bold text-text mb-1">Flag Workout</h3>
-                <p className="text-secondary text-sm mb-5">Your coach will be notified.</p>
-
-                {/* Section 1 — What happened? */}
-                <div className="mb-5">
-                  <textarea
-                    value={flagReason}
-                    onChange={(e) => setFlagReason(e.target.value)}
-                    placeholder="Describe what happened..."
-                    className="input-field min-h-[100px]"
-                  />
-                </div>
-
-                {/* Section 2 — Where does it hurt? */}
-                <div className="mb-5">
-                  <p className="text-sm font-medium text-text mb-3">
-                    Where does it hurt?{" "}
-                    <span className="text-secondary font-normal">(optional)</span>
-                  </p>
-                  <div className="grid grid-cols-3 gap-2 mb-3">
-                    {BODY_REGIONS.map((region) => {
-                      const isSelected = flagBodyRegion === region.key;
-                      return (
-                        <button
-                          key={region.key}
-                          onClick={() => {
-                            if (isSelected) {
-                              setFlagBodyRegion(null);
-                              setFlagBodyRegionDetail("");
-                              setFlagOptInRehab(false);
-                            } else {
-                              setFlagBodyRegion(region.key);
-                            }
-                          }}
-                          className={`py-2 px-1 rounded-lg text-xs font-medium border transition-colors ${
-                            isSelected
-                              ? "border-amber-400 text-amber-400 bg-amber-400/10"
-                              : "border-secondary/30 text-secondary bg-background hover:border-secondary/60"
-                          }`}
-                        >
-                          {region.label}
-                        </button>
-                      );
-                    })}
+                {flagSubmitted ? (
+                  /* Confirmation screen */
+                  <div>
+                    <h3 className="text-xl font-heading font-bold text-text mb-1">Report Submitted</h3>
+                    <p className="text-secondary text-sm mb-3">
+                      {!flagOptInRehab || flagResult === null ? (
+                        "Your coach has been notified and will follow up with you."
+                      ) : flagResult.matched && flagResult.confidence === "high" ? (
+                        <>A recovery plan has been matched: <span className="text-text font-medium">'{flagResult.program_name}'</span> has been added to your dashboard.</>
+                      ) : flagResult.matched && flagResult.confidence === "medium" ? (
+                        <><span className="text-text font-medium">'{flagResult.program_name}'</span> has been added to your dashboard. Your coach will review to confirm it is the right fit.</>
+                      ) : (
+                        "Your coach has been notified and will assign a recovery plan manually."
+                      )}
+                    </p>
+                    <div className="flex gap-3 mt-6">
+                      <button
+                        onClick={() => router.push("/athlete/home")}
+                        className="btn-secondary flex-1"
+                      >
+                        End Workout
+                      </button>
+                      <button
+                        onClick={closeFlagModal}
+                        className="btn-primary flex-1"
+                      >
+                        Continue Workout
+                      </button>
+                    </div>
                   </div>
-                  {flagBodyRegion && (
-                    <div>
-                      <label className="block text-xs text-secondary mb-1">Specify further (optional)</label>
-                      <input
-                        type="text"
-                        value={flagBodyRegionDetail}
-                        onChange={(e) => setFlagBodyRegionDetail(e.target.value)}
-                        placeholder={selectedRegion?.detail_placeholder ?? ""}
-                        className="input-field text-sm"
+                ) : (
+                  /* Flag form */
+                  <div>
+                    <h3 className="text-xl font-heading font-bold text-text mb-1">Report Concern</h3>
+                    <p className="text-secondary text-sm mb-5">Your coach will be notified and will follow up with you.</p>
+
+                    {/* Section 1 — What happened? */}
+                    <div className="mb-5">
+                      <textarea
+                        value={flagReason}
+                        onChange={(e) => setFlagReason(e.target.value)}
+                        placeholder="Describe what happened..."
+                        className="input-field min-h-[100px]"
                       />
                     </div>
-                  )}
-                </div>
 
-                {/* Section 3 — Rehab checkbox (only when region selected) */}
-                {flagBodyRegion && (
-                  <div className="mb-5">
-                    <label className="flex items-center gap-3 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={flagOptInRehab}
-                        onChange={(e) => setFlagOptInRehab(e.target.checked)}
-                        className="w-4 h-4 accent-primary"
-                      />
-                      <span className="text-text text-sm">Request a rehab program for this area</span>
-                    </label>
+                    <hr className="border-secondary/20" />
+
+                    {/* Section 2 — Recovery */}
+                    <div className="mt-5 mb-5">
+                      <p className="text-xs font-medium text-secondary uppercase tracking-wider mb-3">Recovery</p>
+                      <p className="text-sm text-text mb-2">Would you like a recovery plan?</p>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => setFlagOptInRehab(true)}
+                          className={`flex-1 py-2 px-3 rounded-lg text-sm font-medium transition-colors ${
+                            flagOptInRehab
+                              ? "bg-amber-400 text-zinc-900"
+                              : "bg-zinc-800 text-secondary hover:text-text"
+                          }`}
+                        >
+                          Yes, request a plan
+                        </button>
+                        <button
+                          onClick={() => { setFlagOptInRehab(false); setFlagRehabTarget(""); }}
+                          className={`flex-1 py-2 px-3 rounded-lg text-sm font-medium transition-colors ${
+                            !flagOptInRehab
+                              ? "bg-zinc-700 text-text"
+                              : "bg-zinc-800 text-secondary hover:text-text"
+                          }`}
+                        >
+                          No thanks
+                        </button>
+                      </div>
+                      {flagOptInRehab && (
+                        <div className="mt-3">
+                          <label className="block text-sm font-medium text-text mb-1">
+                            What would you like to focus on?
+                          </label>
+                          <textarea
+                            value={flagRehabTarget}
+                            onChange={(e) => setFlagRehabTarget(e.target.value)}
+                            placeholder="e.g. tight hip flexors, lower back tightness, shoulder discomfort when pressing"
+                            className="input-field text-sm min-h-[80px] resize-y"
+                          />
+                          <p className="mt-1.5 text-xs text-secondary">
+                            Be as specific as you can — this helps us find the right program for you.
+                          </p>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* Actions */}
+                    <div className="flex gap-3">
+                      <button onClick={closeFlagModal} className="btn-secondary flex-1">
+                        Cancel
+                      </button>
+                      <button
+                        onClick={() =>
+                          flagWorkoutMutation.mutate({
+                            reason: flagReason,
+                            opt_in_rehab: flagOptInRehab,
+                            rehab_target: flagRehabTarget || null,
+                          })
+                        }
+                        disabled={!flagReason.trim() || flagWorkoutMutation.isPending}
+                        className="btn-primary flex-1"
+                      >
+                        {flagWorkoutMutation.isPending ? "Submitting…" : "Submit Flag"}
+                      </button>
+                    </div>
                   </div>
                 )}
-
-                {/* Actions */}
-                <div className="flex gap-3">
-                  <button onClick={closeFlagModal} className="btn-secondary flex-1">
-                    Cancel
-                  </button>
-                  <button
-                    onClick={() =>
-                      flagWorkoutMutation.mutate({
-                        reason: flagReason,
-                        body_region: flagBodyRegion,
-                        body_region_detail: flagBodyRegionDetail || null,
-                        opt_in_rehab: flagOptInRehab,
-                      })
-                    }
-                    disabled={!flagReason.trim() || flagWorkoutMutation.isPending}
-                    className="btn-primary flex-1"
-                  >
-                    {flagWorkoutMutation.isPending ? "Submitting…" : "Submit Flag"}
-                  </button>
-                </div>
               </div>
             </div>
           );

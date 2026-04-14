@@ -20,18 +20,6 @@ const FEEDBACK_OPTIONS = [
   "Other",
 ];
 
-const BODY_REGIONS = [
-  { key: "neck_upper_back", label: "Neck & Upper Back" },
-  { key: "shoulder", label: "Shoulder" },
-  { key: "elbow_wrist", label: "Elbow & Wrist" },
-  { key: "core_ribs", label: "Core & Ribs" },
-  { key: "lower_back", label: "Lower Back" },
-  { key: "hip", label: "Hip" },
-  { key: "knee", label: "Knee" },
-  { key: "lower_leg_shin", label: "Lower Leg & Shin" },
-  { key: "ankle_foot", label: "Ankle & Foot" },
-];
-
 type PageState = "upload" | "preview" | "saving" | "error";
 
 function Spinner() {
@@ -44,7 +32,6 @@ export default function ImportProgramPage() {
   const { user } = getAuthData();
   const router = useRouter();
   const searchParams = useSearchParams();
-  const programType = searchParams.get("type") === "rehab" ? "rehab" : "strength";
   const folderIdParam = searchParams.get("folder_id");
   const folderId = folderIdParam ? parseInt(folderIdParam) : null;
 
@@ -67,10 +54,7 @@ export default function ImportProgramPage() {
   const [feedbackError, setFeedbackError] = useState("");
   const [feedbackOtherText, setFeedbackOtherText] = useState("");
 
-  const [importProgramType, setImportProgramType] = useState<"strength" | "rehab">(
-    searchParams.get("type") === "rehab" ? "rehab" : "strength"
-  );
-  const [importBodyRegions, setImportBodyRegions] = useState<string[]>([]);
+  const [importProgramType, setImportProgramType] = useState<"strength" | "rehab">("strength");
 
   // Track which workout cards are collapsed (empty = all expanded)
   const [collapsedWorkouts, setCollapsedWorkouts] = useState<Set<number>>(
@@ -165,9 +149,6 @@ export default function ImportProgramPage() {
         program_name: programName,
         description: programDesc || null,
         program_type: importProgramType,
-        body_regions: importProgramType === "rehab" && importBodyRegions.length > 0
-          ? importBodyRegions
-          : null,
         folder_id: folderId,
       });
       router.push("/coach/programs");
@@ -301,7 +282,6 @@ export default function ImportProgramPage() {
                 onChange={handleFileChange}
               />
 
-              {/* Program type toggle */}
               <div className="mt-6">
                 <label className="block text-sm font-medium text-text mb-2">
                   Program Type
@@ -310,10 +290,10 @@ export default function ImportProgramPage() {
                   <button
                     type="button"
                     onClick={() => setImportProgramType("strength")}
-                    className={`flex-1 py-2 px-4 rounded-lg font-medium text-sm transition-colors ${
+                    className={`flex-1 py-2 px-4 rounded-lg font-medium text-sm border transition-colors ${
                       importProgramType === "strength"
-                        ? "bg-primary text-background"
-                        : "bg-secondary/20 text-secondary hover:text-text"
+                        ? "border-primary text-primary bg-primary/10"
+                        : "border-secondary/30 text-secondary bg-zinc-800 hover:text-text"
                     }`}
                   >
                     Strength Training
@@ -321,10 +301,10 @@ export default function ImportProgramPage() {
                   <button
                     type="button"
                     onClick={() => setImportProgramType("rehab")}
-                    className={`flex-1 py-2 px-4 rounded-lg font-medium text-sm transition-colors ${
+                    className={`flex-1 py-2 px-4 rounded-lg font-medium text-sm border transition-colors ${
                       importProgramType === "rehab"
-                        ? "bg-primary text-background"
-                        : "bg-secondary/20 text-secondary hover:text-text"
+                        ? "border-amber-400 text-amber-400 bg-amber-400/10"
+                        : "border-secondary/30 text-secondary bg-zinc-800 hover:text-text"
                     }`}
                   >
                     Rehab / PT
@@ -332,42 +312,7 @@ export default function ImportProgramPage() {
                 </div>
               </div>
 
-              {/* Body regions — only shown for rehab */}
-              {importProgramType === "rehab" && (
-                <div className="mt-4">
-                  <label className="block text-sm font-medium text-text mb-1">
-                    Target Body Regions{" "}
-                    <span className="text-secondary font-normal">(select all that apply)</span>
-                  </label>
-                  <div className="flex flex-wrap gap-2 mt-2">
-                    {BODY_REGIONS.map((region) => {
-                      const selected = importBodyRegions.includes(region.key);
-                      return (
-                        <button
-                          key={region.key}
-                          type="button"
-                          onClick={() =>
-                            setImportBodyRegions((prev) =>
-                              selected
-                                ? prev.filter((k) => k !== region.key)
-                                : [...prev, region.key]
-                            )
-                          }
-                          className={`px-3 py-1.5 rounded-full text-sm font-medium border transition-colors ${
-                            selected
-                              ? "border-amber-400 text-amber-400 bg-amber-400/10"
-                              : "border-secondary/30 text-secondary bg-background hover:border-secondary/60"
-                          }`}
-                        >
-                          {region.label}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              )}
-
-              <div className="mt-6">
+              <div className="mt-4">
                 <button
                   onClick={handleParse}
                   disabled={!selectedFileName}
@@ -414,13 +359,16 @@ export default function ImportProgramPage() {
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-text mb-2">
-                      Description
+                      Description & When to Use
                     </label>
                     <textarea
                       value={programDesc}
                       onChange={(e) => setProgramDesc(e.target.value)}
                       className="input-field min-h-[80px]"
                     />
+                    <p className="mt-1.5 text-xs text-secondary">
+                      For rehab programs: describe symptoms and situations where this plan is appropriate. This helps match the right program to injured athletes automatically.
+                    </p>
                   </div>
                 </div>
               </div>

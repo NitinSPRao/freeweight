@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import Optional
+from typing import List, Optional
 from datetime import datetime
 
 
@@ -12,6 +12,8 @@ class NotificationResponse(BaseModel):
     program_name: Optional[str] = None
     message: str
     notification_type: str
+    confidence: Optional[str] = None
+    candidate_programs: Optional[List[str]] = None
     is_read: bool
     created_at: datetime
     body_region: Optional[str] = None

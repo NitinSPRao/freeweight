@@ -254,6 +254,11 @@ function DraggableProgramCard({
               Archived
             </span>
           )}
+          {program.program_type === "rehab" && (
+            <span className="shrink-0 text-xs bg-amber-400/20 text-amber-400 px-2 py-1 rounded mt-0.5">
+              Rehab / PT
+            </span>
+          )}
         </div>
 
         {program.description && (
@@ -498,9 +503,6 @@ export function ProgramsPageContent({
   const [createMethod, setCreateMethod] = useState<"manual" | "import">(
     "manual"
   );
-  const [modalProgramType, setModalProgramType] = useState<
-    "strength" | "rehab"
-  >("strength");
   const [actionLoading, setActionLoading] = useState<number | null>(null);
 
   // New Folder modal
@@ -1089,7 +1091,7 @@ export function ProgramsPageContent({
               </h2>
 
               {/* Toggle group 1 — creation method */}
-              <div className="mb-6">
+              <div className="mb-8">
                 <p className="text-xs font-medium text-secondary uppercase tracking-wider mb-3">
                   How do you want to create it?
                 </p>
@@ -1117,33 +1119,6 @@ export function ProgramsPageContent({
                 </div>
               </div>
 
-              {/* Toggle group 2 — program type */}
-              <div className="mb-8">
-                <p className="text-xs font-medium text-secondary uppercase tracking-wider mb-3">
-                  What type of program?
-                </p>
-                <div className="flex gap-2">
-                  {(["strength", "rehab"] as const).map((type) => {
-                    const label =
-                      type === "strength" ? "Strength Training" : "Rehab / PT";
-                    const selected = modalProgramType === type;
-                    return (
-                      <button
-                        key={type}
-                        onClick={() => setModalProgramType(type)}
-                        className={`flex-1 py-2.5 px-4 rounded-lg text-sm font-medium border transition-colors ${
-                          selected
-                            ? "bg-amber-400/10 border-amber-400 text-amber-400"
-                            : "bg-zinc-800/40 border-secondary/20 text-secondary hover:border-secondary/40"
-                        }`}
-                      >
-                        {label}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
               {/* Confirm */}
               <button
                 onClick={() => {
@@ -1153,7 +1128,6 @@ export function ProgramsPageContent({
                       ? "/coach/programs/create"
                       : "/coach/programs/import";
                   const qs_params = new URLSearchParams();
-                  if (modalProgramType === "rehab") qs_params.set("type", "rehab");
                   if (currentFolderId !== null)
                     qs_params.set("folder_id", String(currentFolderId));
                   const qs = qs_params.toString();

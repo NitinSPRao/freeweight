@@ -244,6 +244,7 @@ class WorkoutLog(Base):
     flag_reason = Column(Text, nullable=True)
     body_region = Column(String, nullable=True)      # One of BODY_REGIONS; set when flagged with injury
     body_region_detail = Column(Text, nullable=True) # Free-text specificity, e.g. "IT band", "ACL"
+    rehab_target = Column(Text, nullable=True)       # Athlete's free-text rehab goal; set when opt_in_rehab is True
     coach_acknowledged = Column(Boolean, default=False)
     coach_response = Column(Text, nullable=True)
     acknowledged_at = Column(DateTime(timezone=True), nullable=True)
@@ -280,7 +281,9 @@ class Notification(Base):
     workout_log_id = Column(Integer, ForeignKey("workout_logs.id"), nullable=True)
     program_id = Column(Integer, ForeignKey("programs.id"), nullable=True)
     message = Column(Text, nullable=False)
-    notification_type = Column(String, nullable=False)  # "rehab_assigned" or "injury_no_rehab"
+    notification_type = Column(String, nullable=False)  # "rehab_assigned", "rehab_assigned_review", or "injury_no_rehab"
+    confidence = Column(String, nullable=True)           # AI match confidence: "high", "medium", "low", or null
+    candidate_programs = Column(ARRAY(String), nullable=True)  # Ambiguous program names for medium-confidence matches
     is_read = Column(Boolean, default=False, nullable=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
