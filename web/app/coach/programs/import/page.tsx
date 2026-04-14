@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { Suspense, useState, useRef } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import AuthGuard from "@/components/AuthGuard";
@@ -41,6 +41,14 @@ function Spinner() {
 }
 
 export default function ImportProgramPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-background" />}>
+      <ImportProgramContent />
+    </Suspense>
+  );
+}
+
+function ImportProgramContent() {
   const { user } = getAuthData();
   const router = useRouter();
   const searchParams = useSearchParams();
