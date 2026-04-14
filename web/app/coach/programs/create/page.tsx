@@ -1,7 +1,7 @@
 "use client";
 
 import { useMutation, useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { Suspense, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import AuthGuard from "@/components/AuthGuard";
 import NavBar from "@/components/NavBar";
@@ -95,6 +95,14 @@ function StepIndicator({ current }: { current: number }) {
 // ─── Main page ────────────────────────────────────────────────────────────────
 
 export default function CreateProgramPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-background" />}>
+      <CreateProgramContent />
+    </Suspense>
+  );
+}
+
+function CreateProgramContent() {
   const { user } = getAuthData();
   const router = useRouter();
   const searchParams = useSearchParams();
