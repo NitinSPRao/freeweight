@@ -10,7 +10,8 @@ class ExerciseCreate(BaseModel):
     target_exercise: Optional[str] = None
     video_url: Optional[str] = None
     coach_notes: Optional[str] = None
-    rest_seconds: Optional[int] = None  # Rest time between sets (default: 90)
+    rest_seconds: Optional[int] = None
+    group_label: Optional[str] = None
     order: int
 
 class ExerciseResponse(BaseModel):
@@ -23,6 +24,7 @@ class ExerciseResponse(BaseModel):
     video_url: Optional[str] = None
     coach_notes: Optional[str] = None
     rest_seconds: Optional[int] = None
+    group_label: Optional[str] = None
     order: int
 
     class Config:
@@ -30,13 +32,17 @@ class ExerciseResponse(BaseModel):
 
 class WorkoutCreate(BaseModel):
     name: str
-    day_offset: int
+    day_offset: int = 0
+    week_number: Optional[int] = None
+    day_label: Optional[str] = None
     description: Optional[str] = None
 
 class WorkoutResponse(BaseModel):
     id: int
     name: str
     day_offset: Optional[int] = None
+    week_number: Optional[int] = None
+    day_label: Optional[str] = None
     scheduled_date: Optional[datetime] = None
     description: Optional[str] = None
     exercises: List[ExerciseResponse]
@@ -50,6 +56,10 @@ class ProgramCreate(BaseModel):
     program_type: Optional[str] = "strength"
     body_regions: Optional[List[str]] = None
     folder_id: Optional[int] = None
+    num_weeks: Optional[int] = 1
+    day_mode: Optional[str] = "offset"
+    is_ongoing: Optional[bool] = False
+    same_every_week: Optional[bool] = False
 
 class ProgramResponse(BaseModel):
     id: int
@@ -60,6 +70,10 @@ class ProgramResponse(BaseModel):
     workout_count: int = 0
     program_type: str = "strength"
     body_regions: Optional[List[str]] = None
+    num_weeks: Optional[int] = 1
+    day_mode: Optional[str] = "offset"
+    is_ongoing: bool = False
+    same_every_week: bool = False
 
     class Config:
         from_attributes = True

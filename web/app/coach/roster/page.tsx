@@ -9,6 +9,7 @@ import apiClient from "@/lib/api-client";
 import { programApi, coachApi } from "@/lib/api-endpoints";
 import { getAuthData } from "@/lib/auth";
 import { extractErrorMessage } from "@/lib/utils";
+import { AssignProgramModal } from "@/components/AssignProgramModal";
 
 interface Athlete {
   id: number;
@@ -74,6 +75,12 @@ export default function CoachRosterPage() {
   });
 
   const [createGroupError, setCreateGroupError] = useState<string | null>(null);
+
+  const [assignModal, setAssignModal] = useState<{
+    targetType: "athlete" | "group";
+    targetId: number;
+    targetName: string;
+  } | null>(null);
 
   const createGroupMutation = useMutation({
     mutationFn: async (data: { name: string; sport?: string }) => {
@@ -231,38 +238,54 @@ export default function CoachRosterPage() {
               {roster && roster.length > 0 ? (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                   {roster.map((athlete) => (
-                    <Link key={athlete.id} href={`/coach/athletes/${athlete.id}`} className="card block hover:border-primary/40 transition-colors">
-                      <h3 className="text-xl font-heading font-bold text-text mb-2">
-                        {athlete.name}
-                      </h3>
-                      <div className="space-y-1 text-sm mb-3">
-                        <p className="text-secondary text-xs">{athlete.email}</p>
-                        {athlete.sport && (
-                          <p className="text-secondary">
-                            <span className="font-medium">Sport:</span> {athlete.sport}
-                          </p>
-                        )}
-                        {athlete.team && (
-                          <p className="text-secondary">
-                            <span className="font-medium">Team:</span> {athlete.team}
-                          </p>
-                        )}
-                      </div>
-
-                      {/* Groups */}
-                      {athlete.groups && athlete.groups.length > 0 && (
-                        <div className="mt-3 flex flex-wrap gap-2">
-                          {athlete.groups.map((group) => (
-                            <span
-                              key={group.id}
-                              className="px-2 py-1 bg-primary/20 text-primary rounded text-xs font-medium"
-                            >
-                              {group.name}
-                            </span>
-                          ))}
+                    <div key={athlete.id} className="card hover:border-primary/40 transition-colors flex flex-col">
+                      <Link href={`/coach/athletes/${athlete.id}`} className="block flex-1">
+                        <h3 className="text-xl font-heading font-bold text-text mb-2">
+                          {athlete.name}
+                        </h3>
+                        <div className="space-y-1 text-sm mb-3">
+                          <p className="text-secondary text-xs">{athlete.email}</p>
+                          {athlete.sport && (
+                            <p className="text-secondary">
+                              <span className="font-medium">Sport:</span> {athlete.sport}
+                            </p>
+                          )}
+                          {athlete.team && (
+                            <p className="text-secondary">
+                              <span className="font-medium">Team:</span> {athlete.team}
+                            </p>
+                          )}
                         </div>
-                      )}
-                    </Link>
+
+                        {/* Groups */}
+                        {athlete.groups && athlete.groups.length > 0 && (
+                          <div className="mt-3 flex flex-wrap gap-2">
+                            {athlete.groups.map((group) => (
+                              <span
+                                key={group.id}
+                                className="px-2 py-1 bg-primary/20 text-primary rounded text-xs font-medium"
+                              >
+                                {group.name}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </Link>
+                      <div className="mt-3 pt-3 border-t border-secondary/10">
+                        <button
+                          onClick={() =>
+                            setAssignModal({
+                              targetType: "athlete",
+                              targetId: athlete.id,
+                              targetName: athlete.name,
+                            })
+                          }
+                          className="text-xs text-primary hover:text-primary/80 font-medium transition-colors"
+                        >
+                          Assign Program →
+                        </button>
+                      </div>
+                    </div>
                   ))}
                 </div>
               ) : (
@@ -302,6 +325,18 @@ export default function CoachRosterPage() {
                           <span className="px-3 py-1 bg-primary/20 text-primary rounded-lg text-sm font-medium">
                             {group.member_count} members
                           </span>
+                          <button
+                            onClick={() =>
+                              setAssignModal({
+                                targetType: "group",
+                                targetId: group.id,
+                                targetName: group.name,
+                              })
+                            }
+                            className="btn-secondary text-sm py-1 px-3"
+                          >
+                            Assign Program
+                          </button>
                           <button
                             onClick={() => setSelectedGroup(group)}
                             className="btn-secondary text-sm py-1 px-3"
@@ -612,6 +647,18 @@ export default function CoachRosterPage() {
           </div>
         )}
       </div>
+
+      {/* Assign Program Modal */}
+      {assignModal && (
+        <AssignProgramModal
+          mode="from-roster"
+          targetType={assignModal.targetType}
+          targetId={assignModal.targetId}
+          targetName={assignModal.targetName}
+          isOpen={true}
+          onClose={() => setAssignModal(null)}
+        />
+      )}
     </AuthGuard>
   );
 }

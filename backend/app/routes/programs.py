@@ -1,7 +1,12 @@
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from datetime import datetime, timedelta
 from typing import List, Optional
+from pydantic import BaseModel
+
+logger = logging.getLogger(__name__)
 from ..database import get_db
 from ..auth import get_current_coach
 from ..models import User, Program, Workout, Exercise, ProgramAssignment, Group, Subgroup, WorkoutLog, SetLog, Folder
@@ -17,6 +22,23 @@ from ..schemas.program import (
 from ..schemas.folder import ProgramMove
 
 router = APIRouter(prefix="/api/programs", tags=["programs"])
+
+# Maps weekday names to 0-indexed offsets from Monday.
+_WEEKDAY_OFFSETS: dict[str, int] = {
+    "Monday": 0, "Tuesday": 1, "Wednesday": 2, "Thursday": 3,
+    "Friday": 4, "Saturday": 5, "Sunday": 6,
+}
+
+
+def _template_day_offset(program: Program, template: Workout) -> int:
+    """Return the day offset from program start for a template workout."""
+    if (
+        program.day_mode == "weekday"
+        and template.week_number is not None
+        and template.day_label
+    ):
+        return (template.week_number - 1) * 7 + _WEEKDAY_OFFSETS.get(template.day_label, 0)
+    return template.day_offset or 0
 
 
 def _materialize_program_for_athlete(
@@ -38,7 +60,7 @@ def _materialize_program_for_athlete(
     template_workouts = [w for w in program.workouts if w.athlete_id is None]
 
     for template in template_workouts:
-        day_offset = template.day_offset or 0
+        day_offset = _template_day_offset(program, template)
         scheduled_date = start_date + timedelta(days=day_offset)
 
         concrete_workout = Workout(
@@ -48,6 +70,8 @@ def _materialize_program_for_athlete(
             description=template.description,
             scheduled_date=scheduled_date,
             day_offset=day_offset,
+            week_number=template.week_number,
+            day_label=template.day_label,
         )
         db.add(concrete_workout)
         db.flush()  # populate concrete_workout.id
@@ -62,6 +86,8 @@ def _materialize_program_for_athlete(
                 target_exercise=template_exercise.target_exercise,
                 video_url=template_exercise.video_url,
                 coach_notes=template_exercise.coach_notes,
+                rest_seconds=template_exercise.rest_seconds,
+                group_label=template_exercise.group_label,
                 order=template_exercise.order,
             ))
 
@@ -86,7 +112,9 @@ def _serialize_program(program: Program, include_workouts: bool = True) -> Progr
                     target_exercise=ex.target_exercise,
                     video_url=ex.video_url,
                     coach_notes=ex.coach_notes,
-                    order=ex.order
+                    rest_seconds=ex.rest_seconds,
+                    group_label=ex.group_label,
+                    order=ex.order,
                 )
                 for ex in sorted(workout.exercises, key=lambda e: e.order)
             ]
@@ -94,9 +122,11 @@ def _serialize_program(program: Program, include_workouts: bool = True) -> Progr
                 id=workout.id,
                 name=workout.name,
                 day_offset=workout.day_offset,
+                week_number=workout.week_number,
+                day_label=workout.day_label,
                 scheduled_date=workout.scheduled_date,
                 description=workout.description,
-                exercises=exercises
+                exercises=exercises,
             ))
 
     # Count only template workouts (athlete_id is None = coach-created templates)
@@ -111,6 +141,10 @@ def _serialize_program(program: Program, include_workouts: bool = True) -> Progr
         workout_count=template_count,
         program_type=program.program_type or "strength",
         body_regions=program.body_regions,
+        num_weeks=program.num_weeks or 1,
+        day_mode=program.day_mode or "offset",
+        is_ongoing=program.is_ongoing or False,
+        same_every_week=program.same_every_week or False,
     )
 
 
@@ -175,6 +209,10 @@ def create_program(
         body_regions=program_data.body_regions,
         folder_id=program_data.folder_id,
         order=order,
+        num_weeks=program_data.num_weeks or 1,
+        day_mode=program_data.day_mode or "offset",
+        is_ongoing=program_data.is_ongoing or False,
+        same_every_week=program_data.same_every_week or False,
     )
     db.add(new_program)
     db.commit()
@@ -188,6 +226,10 @@ def create_program(
         workouts=[],
         program_type=new_program.program_type,
         body_regions=new_program.body_regions,
+        num_weeks=new_program.num_weeks or 1,
+        day_mode=new_program.day_mode or "offset",
+        is_ongoing=new_program.is_ongoing or False,
+        same_every_week=new_program.same_every_week or False,
     )
 
 
@@ -205,6 +247,120 @@ def get_program(
     if not program:
         raise HTTPException(status_code=404, detail="Program not found")
 
+    return _serialize_program(program)
+
+
+# ─── Request models for PUT /api/programs/{program_id} ───────────────────────
+
+class ProgramUpdateExercise(BaseModel):
+    name: str
+    sets: int
+    reps: int
+    coach_notes: Optional[str] = None
+    order: int
+    rest_seconds: Optional[int] = None
+    group_label: Optional[str] = None
+    video_url: Optional[str] = None
+
+
+class ProgramUpdateWorkout(BaseModel):
+    name: str
+    day_offset: int = 0
+    week_number: Optional[int] = None
+    day_label: Optional[str] = None
+    description: Optional[str] = None
+    exercises: List[ProgramUpdateExercise]
+
+
+class ProgramUpdateRequest(BaseModel):
+    name: str
+    description: Optional[str] = None
+    workouts: List[ProgramUpdateWorkout]
+    program_type: Optional[str] = "strength"
+    num_weeks: Optional[int] = None
+    day_mode: Optional[str] = "offset"
+    is_ongoing: Optional[bool] = False
+    same_every_week: Optional[bool] = False
+
+
+@router.put("/{program_id}", response_model=ProgramResponse)
+def update_program(
+    program_id: int,
+    data: ProgramUpdateRequest,
+    current_coach: User = Depends(get_current_coach),
+    db: Session = Depends(get_db)
+):
+    program = db.query(Program).filter(
+        Program.id == program_id,
+        Program.coach_id == current_coach.id
+    ).first()
+
+    if not program:
+        raise HTTPException(status_code=404, detail="Program not found")
+
+    logger.info(
+        "PUT /api/programs/%s: received name=%r, %d workouts, "
+        "same_every_week=%s, is_ongoing=%s, num_weeks=%s",
+        program_id, data.name, len(data.workouts),
+        data.same_every_week, data.is_ongoing, data.num_weeks,
+    )
+
+    # Update metadata fields
+    program.name = data.name
+    program.description = data.description
+    program.program_type = data.program_type or "strength"
+    program.num_weeks = data.num_weeks if not data.is_ongoing else None
+    program.day_mode = data.day_mode or "offset"
+    program.is_ongoing = data.is_ongoing or False
+    program.same_every_week = data.same_every_week or False
+
+    # Delete all template workouts (athlete_id is None) and their exercises
+    template_workouts = [w for w in program.workouts if w.athlete_id is None]
+    logger.info("  Deleting %d existing template workouts", len(template_workouts))
+    for workout in template_workouts:
+        for ex in list(workout.exercises):
+            db.delete(ex)
+        db.delete(workout)
+    db.flush()
+
+    # Recreate template workouts and exercises from the request body
+    now = datetime.utcnow()
+    total_exercises = 0
+    for w_data in data.workouts:
+        new_workout = Workout(
+            program_id=program_id,
+            name=w_data.name,
+            day_offset=w_data.day_offset,
+            week_number=w_data.week_number,
+            day_label=w_data.day_label,
+            description=w_data.description,
+            scheduled_date=now,
+        )
+        db.add(new_workout)
+        db.flush()
+
+        for e_data in w_data.exercises:
+            db.add(Exercise(
+                workout_id=new_workout.id,
+                name=e_data.name,
+                sets=e_data.sets,
+                reps=e_data.reps,
+                coach_notes=e_data.coach_notes,
+                order=e_data.order,
+                rest_seconds=e_data.rest_seconds,
+                group_label=e_data.group_label,
+                video_url=e_data.video_url,
+            ))
+            total_exercises += 1
+
+    logger.info(
+        "  Recreated %d template workouts with %d total exercises; committing",
+        len(data.workouts), total_exercises,
+    )
+    db.commit()
+    db.refresh(program)
+    template_count_after = sum(1 for w in program.workouts if w.athlete_id is None)
+    logger.info("  Commit OK — program now has %d template workouts", template_count_after)
     return _serialize_program(program)
 
 
@@ -228,8 +384,10 @@ def add_workout_to_program(
         program_id=program_id,
         name=workout_data.name,
         day_offset=workout_data.day_offset,
+        week_number=workout_data.week_number,
+        day_label=workout_data.day_label,
         description=workout_data.description,
-        scheduled_date=datetime.utcnow()
+        scheduled_date=datetime.utcnow(),
     )
     db.add(new_workout)
     db.commit()
@@ -239,9 +397,11 @@ def add_workout_to_program(
         id=new_workout.id,
         name=new_workout.name,
         day_offset=new_workout.day_offset,
+        week_number=new_workout.week_number,
+        day_label=new_workout.day_label,
         scheduled_date=new_workout.scheduled_date,
         description=new_workout.description,
-        exercises=[]
+        exercises=[],
     )
 
 
@@ -269,7 +429,9 @@ def add_exercise_to_workout(
         target_exercise=exercise_data.target_exercise,
         video_url=exercise_data.video_url,
         coach_notes=exercise_data.coach_notes,
-        order=exercise_data.order
+        rest_seconds=exercise_data.rest_seconds,
+        group_label=exercise_data.group_label,
+        order=exercise_data.order,
     )
     db.add(new_exercise)
     db.commit()
@@ -284,7 +446,9 @@ def add_exercise_to_workout(
         target_exercise=new_exercise.target_exercise,
         video_url=new_exercise.video_url,
         coach_notes=new_exercise.coach_notes,
-        order=new_exercise.order
+        rest_seconds=new_exercise.rest_seconds,
+        group_label=new_exercise.group_label,
+        order=new_exercise.order,
     )
 
 
@@ -463,7 +627,13 @@ def duplicate_program(
     new_program = Program(
         coach_id=current_coach.id,
         name=f"{program.name} (Copy)",
-        description=program.description
+        description=program.description,
+        program_type=program.program_type or "strength",
+        body_regions=program.body_regions,
+        num_weeks=program.num_weeks,
+        day_mode=program.day_mode,
+        is_ongoing=program.is_ongoing or False,
+        same_every_week=program.same_every_week or False,
     )
     db.add(new_program)
     db.flush()
@@ -474,8 +644,10 @@ def duplicate_program(
             program_id=new_program.id,
             name=workout.name,
             day_offset=workout.day_offset,
+            week_number=workout.week_number,
+            day_label=workout.day_label,
             description=workout.description,
-            scheduled_date=workout.scheduled_date
+            scheduled_date=workout.scheduled_date,
         )
         db.add(new_workout)
         db.flush()
@@ -491,7 +663,8 @@ def duplicate_program(
                 video_url=exercise.video_url,
                 coach_notes=exercise.coach_notes,
                 order=exercise.order,
-                rest_seconds=exercise.rest_seconds
+                rest_seconds=exercise.rest_seconds,
+                group_label=exercise.group_label,
             ))
 
     db.commit()

@@ -11,11 +11,15 @@ export interface ParsedExercise {
   coach_notes: string | null;
   order: number;
   rest_seconds: number | null;
+  group_label?: string | null;
+  video_url?: string | null;
 }
 
 export interface ParsedWorkout {
   name: string;
   day_offset: number;
+  week_number?: number | null;
+  day_label?: string | null;
   description: string | null;
   exercises: ParsedExercise[];
 }
@@ -26,6 +30,8 @@ export interface ParsedProgram {
   workouts: ParsedWorkout[];
   program_type?: string;
   body_regions?: string[] | null;
+  num_weeks?: number | null;
+  day_mode?: string | null;
 }
 
 export interface FlagResult {
@@ -54,6 +60,7 @@ export interface Exercise {
   video_url?: string;
   coach_notes?: string;
   rest_seconds?: number;
+  group_label?: string | null;
   order: number;
 }
 
@@ -62,6 +69,8 @@ export interface Workout {
   name: string;
   scheduled_date: string;
   day_offset?: number;
+  week_number?: number | null;
+  day_label?: string | null;
   exercises: Exercise[];
   workout_log_id?: number;
   is_completed?: boolean;
@@ -78,10 +87,15 @@ export interface Program {
   updated_at?: string;
   archived?: boolean;
   workouts: Workout[];
+  workout_count?: number;
   program_type: string;   // "strength" or "rehab"
   body_regions: string[] | null;
   folder_id?: number | null;
   order?: number;
+  num_weeks?: number | null;
+  day_mode?: string | null;
+  is_ongoing?: boolean;
+  same_every_week?: boolean;
 }
 
 export interface FolderContents {
@@ -546,7 +560,31 @@ export const programApi = {
     return response.data;
   },
 
-  update: async (programId: number, data: { name?: string; description?: string }) => {
+  update: async (programId: number, data: {
+    name: string;
+    description?: string | null;
+    workouts: Array<{
+      name: string;
+      day_offset: number;
+      week_number?: number | null;
+      day_label?: string | null;
+      description?: string | null;
+      exercises: Array<{
+        name: string;
+        sets: number;
+        reps: number;
+        coach_notes?: string | null;
+        group_label?: string | null;
+        rest_seconds?: number | null;
+        order: number;
+      }>;
+    }>;
+    program_type?: string;
+    num_weeks?: number | null;
+    day_mode?: string | null;
+    is_ongoing?: boolean;
+    same_every_week?: boolean;
+  }) => {
     const response = await apiClient.put<Program>(`/api/programs/${programId}`, data);
     return response.data;
   },
@@ -576,6 +614,9 @@ export const programApi = {
   addWorkout: async (programId: number, data: {
     name: string;
     day_offset: number;
+    week_number?: number;
+    day_label?: string;
+    description?: string;
   }) => {
     const response = await apiClient.post(`/api/programs/${programId}/workouts`, data);
     return response.data;
@@ -599,6 +640,8 @@ export const programApi = {
     target_exercise?: string;
     video_url?: string;
     coach_notes?: string;
+    rest_seconds?: number | null;
+    group_label?: string | null;
     order: number;
   }) => {
     const response = await apiClient.post(`/api/programs/workouts/${workoutId}/exercises`, data);
@@ -633,7 +676,7 @@ export const programApi = {
     return response.data;
   },
 
-  importProgram: async (data: ParsedProgram & { folder_id?: number | null }) => {
+  importProgram: async (data: Omit<ParsedProgram, "num_weeks" | "day_mode"> & { folder_id?: number | null; num_weeks?: number | null; day_mode?: string | null; is_ongoing?: boolean; same_every_week?: boolean }) => {
     const response = await apiClient.post<{
       program_id: number;
       program_name: string;

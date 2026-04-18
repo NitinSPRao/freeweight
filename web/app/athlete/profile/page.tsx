@@ -35,6 +35,11 @@ export default function AthleteProfilePage() {
   const [inviteCode, setInviteCode] = useState("");
   const [photoUploading, setPhotoUploading] = useState(false);
 
+  const [showJoinGroup, setShowJoinGroup] = useState(false);
+  const [groupInviteCode, setGroupInviteCode] = useState("");
+  const [joinGroupSuccess, setJoinGroupSuccess] = useState(false);
+  const [joinGroupError, setJoinGroupError] = useState<string | null>(null);
+
   // Get fresh progress data for the profile
   const { data: progressData } = useQuery({
     queryKey: ["progress"],
@@ -65,6 +70,32 @@ export default function AthleteProfilePage() {
       alert(extractErrorMessage(error, "Failed to change coach."));
     },
   });
+
+  const joinGroupMutation = useMutation({
+    mutationFn: (code: string) => athleteApi.joinGroup(code),
+    onSuccess: () => {
+      setJoinGroupSuccess(true);
+      setJoinGroupError(null);
+    },
+    onError: (error: any) => {
+      setJoinGroupError(extractErrorMessage(error, "Invalid invite code. Please check and try again."));
+    },
+  });
+
+  const handleJoinGroup = () => {
+    if (groupInviteCode.trim().length === 6) {
+      joinGroupMutation.mutate(groupInviteCode.toUpperCase());
+    } else {
+      setJoinGroupError("Please enter a valid 6-character invite code.");
+    }
+  };
+
+  const closeJoinGroupModal = () => {
+    setShowJoinGroup(false);
+    setGroupInviteCode("");
+    setJoinGroupSuccess(false);
+    setJoinGroupError(null);
+  };
 
   const handleSaveProfile = () => {
     updateProfileMutation.mutate(formData);
@@ -311,15 +342,29 @@ export default function AthleteProfilePage() {
             </div>
           )}
 
-          {/* ── Coach Section ── */}
+          {/* ── Groups & Coach Section ── */}
           <div className="bg-[#1F2937] rounded-xl border border-secondary/15 p-6 mb-6">
-            <h2 className="text-xl font-heading font-bold text-text mb-4">Coach</h2>
+            <h2 className="text-xl font-heading font-bold text-text mb-4">Groups</h2>
+            <p className="text-secondary text-sm mb-4">
+              Join a group using an invite code from your coach.
+            </p>
+            <button onClick={() => setShowJoinGroup(true)} className="btn-primary text-sm">
+              Join a Group
+            </button>
 
-            {showCoachChange ? (
-              <div className="space-y-4">
-                <p className="text-secondary text-sm">
-                  Enter your new coach&apos;s invite code.
-                </p>
+            {/* Change Coach — de-emphasized */}
+            {!showCoachChange ? (
+              <div className="mt-4">
+                <button
+                  onClick={() => setShowCoachChange(true)}
+                  className="text-xs text-secondary hover:text-text transition-colors underline-offset-2 hover:underline"
+                >
+                  Need to change your coach?
+                </button>
+              </div>
+            ) : (
+              <div className="mt-4 space-y-3 border-t border-secondary/15 pt-4">
+                <p className="text-secondary text-sm">Enter your new coach&apos;s invite code.</p>
                 <input
                   type="text"
                   value={inviteCode}
@@ -344,15 +389,6 @@ export default function AthleteProfilePage() {
                   </button>
                 </div>
               </div>
-            ) : (
-              <div>
-                <p className="text-secondary text-sm mb-4">
-                  Your coach assigns programs and monitors your progress.
-                </p>
-                <button onClick={() => setShowCoachChange(true)} className="btn-secondary text-sm">
-                  Change Coach
-                </button>
-              </div>
             )}
           </div>
 
@@ -365,6 +401,78 @@ export default function AthleteProfilePage() {
           </div>
         </main>
       </div>
+
+      {/* Join a Group Modal */}
+      {showJoinGroup && (
+        <div
+          className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4"
+          onMouseDown={(e) => { if (e.target === e.currentTarget) closeJoinGroupModal(); }}
+        >
+          <div className="bg-background border border-secondary/30 rounded-2xl shadow-2xl w-full max-w-sm p-6 relative">
+            <button
+              onClick={closeJoinGroupModal}
+              className="absolute top-4 right-4 w-8 h-8 flex items-center justify-center rounded-lg text-secondary hover:text-text hover:bg-secondary/10 transition-colors text-lg"
+              aria-label="Close"
+            >
+              ✕
+            </button>
+
+            <h2 className="text-lg font-heading font-bold text-text mb-5 pr-8">Join a Group</h2>
+
+            {joinGroupSuccess ? (
+              <div className="text-center py-4">
+                <p className="text-primary font-medium mb-1">You&apos;ve been added to the group!</p>
+                <p className="text-secondary text-sm mb-4">
+                  Your coach&apos;s programs and group assignments will now appear in your calendar.
+                </p>
+                <button onClick={closeJoinGroupModal} className="btn-secondary text-sm">
+                  Done
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                <div>
+                  <label className="block text-sm font-medium text-text mb-2">
+                    Group Invite Code
+                  </label>
+                  <input
+                    type="text"
+                    value={groupInviteCode}
+                    onChange={(e) => {
+                      setGroupInviteCode(e.target.value.toUpperCase());
+                      setJoinGroupError(null);
+                    }}
+                    maxLength={6}
+                    className="input-field uppercase tracking-widest"
+                    placeholder="ABC123"
+                    autoFocus
+                  />
+                </div>
+
+                {joinGroupError && (
+                  <div className="p-3 rounded-lg bg-error/10 border border-error/40 text-error text-sm">
+                    {joinGroupError}
+                  </div>
+                )}
+
+                <div className="flex gap-3 pt-1">
+                  <button type="button" onClick={closeJoinGroupModal} className="flex-1 btn-secondary">
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleJoinGroup}
+                    disabled={joinGroupMutation.isPending}
+                    className="flex-1 btn-primary"
+                  >
+                    {joinGroupMutation.isPending ? "Joining..." : "Join Group"}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </AuthGuard>
   );
 }

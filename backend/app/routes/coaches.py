@@ -649,11 +649,15 @@ class ImportExercise(BaseModel):
     coach_notes: Optional[str] = None
     order: int
     rest_seconds: Optional[int] = None
+    group_label: Optional[str] = None
+    video_url: Optional[str] = None
 
 
 class ImportWorkout(BaseModel):
     name: str
-    day_offset: int
+    day_offset: int = 0
+    week_number: Optional[int] = None
+    day_label: Optional[str] = None
     description: Optional[str] = None
     exercises: List[ImportExercise]
 
@@ -664,6 +668,11 @@ class ImportProgramRequest(BaseModel):
     workouts: List[ImportWorkout]
     program_type: Optional[str] = "strength"
     body_regions: Optional[List[str]] = None
+    num_weeks: Optional[int] = 1
+    day_mode: Optional[str] = "offset"
+    folder_id: Optional[int] = None
+    is_ongoing: Optional[bool] = False
+    same_every_week: Optional[bool] = False
 
 
 @router.post("/programs/import")
@@ -679,6 +688,11 @@ def import_program(
         coach_id=current_coach.id,
         program_type=data.program_type or "strength",
         body_regions=data.body_regions or None,
+        num_weeks=data.num_weeks if not data.is_ongoing else None,
+        day_mode=data.day_mode or "offset",
+        folder_id=data.folder_id,
+        is_ongoing=data.is_ongoing or False,
+        same_every_week=data.same_every_week or False,
     )
     db.add(program)
     db.flush()  # get program.id before creating workouts
@@ -691,6 +705,8 @@ def import_program(
             program_id=program.id,
             name=w_data.name,
             day_offset=w_data.day_offset,
+            week_number=w_data.week_number,
+            day_label=w_data.day_label,
             description=w_data.description,
             scheduled_date=now + timedelta(days=w_data.day_offset),
         )
@@ -706,6 +722,8 @@ def import_program(
                 coach_notes=e_data.coach_notes,
                 order=e_data.order,
                 rest_seconds=e_data.rest_seconds,
+                group_label=e_data.group_label,
+                video_url=e_data.video_url,
             )
             db.add(exercise)
             exercise_count += 1

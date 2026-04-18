@@ -5,6 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import { useState } from "react";
 import AuthGuard from "@/components/AuthGuard";
 import NavBar from "@/components/NavBar";
+import ProgramDisplay, { programToDisplay } from "@/components/ProgramDisplay";
 import { programApi, coachApi, AthleteProfile } from "@/lib/api-endpoints";
 import { getAuthData } from "@/lib/auth";
 import { formatDate, extractErrorMessage } from "@/lib/utils";
@@ -107,50 +108,62 @@ export default function ProgramDetailPage() {
     );
   }
 
-  // Sort workouts by day offset
-  const sortedWorkouts = [...(program.workouts || [])].sort(
-    (a, b) => (a.day_offset || 0) - (b.day_offset || 0)
-  );
+  const workoutCount = program.workouts?.length ?? 0;
 
   return (
     <AuthGuard requiredUserType="coach">
       <div className="min-h-screen bg-background">
         <NavBar userName={user?.name || ""} userType="coach" />
 
-        <main className="max-w-7xl mx-auto px-4 py-8">
-          {/* Header */}
-          <div className="mb-8">
-            <div className="flex items-center gap-3 mb-4">
-              <Link
-                href="/coach/programs"
-                className="text-primary hover:underline text-sm"
-              >
-                ← Back to Programs
-              </Link>
-            </div>
+        <main className="max-w-4xl mx-auto px-4 py-8">
+          {/* Back link */}
+          <div className="mb-4">
+            <Link
+              href="/coach/programs"
+              className="text-secondary hover:text-text text-sm inline-flex items-center gap-1"
+            >
+              ← Back to Programs
+            </Link>
+          </div>
 
-            <div className="flex justify-between items-start">
-              <div>
-                <div className="flex items-center gap-3 mb-2">
-                  <h1 className="text-3xl font-heading font-bold text-text">
+          {/* Header card */}
+          <div className="card mb-6">
+            <div className="flex justify-between items-start gap-4">
+              <div className="min-w-0">
+                <div className="flex items-center gap-3 mb-1 flex-wrap">
+                  <h1 className="text-2xl font-heading font-bold text-text">
                     {program.name}
                   </h1>
                   {program.archived && (
-                    <span className="text-sm bg-secondary/20 text-secondary px-3 py-1 rounded">
+                    <span className="text-xs bg-secondary/20 text-secondary px-2 py-0.5 rounded">
                       Archived
+                    </span>
+                  )}
+                  {program.program_type === "rehab" && (
+                    <span className="text-xs bg-amber-400/15 text-amber-400 px-2 py-0.5 rounded border border-amber-400/30">
+                      Rehab / PT
                     </span>
                   )}
                 </div>
                 {program.description && (
-                  <p className="text-secondary mb-2">{program.description}</p>
+                  <p className="text-secondary text-sm mb-2">{program.description}</p>
                 )}
-                <p className="text-secondary text-sm">
-                  Created {formatDate(program.created_at)} • {sortedWorkouts.length}{" "}
-                  workout{sortedWorkouts.length !== 1 ? "s" : ""}
+                <p className="text-secondary text-xs">
+                  Created {formatDate(program.created_at)}
+                  {" · "}
+                  {workoutCount} workout{workoutCount !== 1 ? "s" : ""}
+                  {program.same_every_week && " · Same every week"}
+                  {program.is_ongoing
+                    ? " · Ongoing"
+                    : program.same_every_week && program.num_weeks
+                    ? ` · Repeats ${program.num_weeks} weeks`
+                    : program.num_weeks
+                    ? ` · ${program.num_weeks} weeks`
+                    : null}
                 </p>
               </div>
 
-              <div className="flex gap-3">
+              <div className="flex gap-2 flex-shrink-0 flex-wrap justify-end">
                 {program.archived ? (
                   <button
                     onClick={() => restoreMutation.mutate()}
@@ -194,75 +207,8 @@ export default function ProgramDetailPage() {
             </div>
           </div>
 
-          {/* Workouts List */}
-          {sortedWorkouts.length > 0 ? (
-            <div className="space-y-4">
-              {sortedWorkouts.map((workout) => (
-                <div key={workout.id} className="card">
-                  <div className="flex justify-between items-start mb-4">
-                    <div>
-                      <div className="flex items-center gap-3 mb-1">
-                        <span className="text-sm font-medium text-primary bg-primary/10 px-2 py-1 rounded">
-                          Day {(workout.day_offset || 0) + 1}
-                        </span>
-                        <h3 className="text-xl font-heading font-bold text-text">
-                          {workout.name}
-                        </h3>
-                      </div>
-                      <p className="text-secondary text-sm">
-                        {workout.exercises?.length || 0} exercise
-                        {workout.exercises?.length !== 1 ? "s" : ""}
-                      </p>
-                    </div>
-                  </div>
-
-                  {/* Exercises */}
-                  {workout.exercises && workout.exercises.length > 0 ? (
-                    <div className="space-y-2">
-                      {workout.exercises
-                        .sort((a, b) => a.order - b.order)
-                        .map((exercise, idx) => (
-                          <div
-                            key={exercise.id}
-                            className="bg-background rounded-lg p-4 border border-secondary/10"
-                          >
-                            <div className="flex items-start gap-3">
-                              <span className="text-secondary text-sm font-medium mt-1">
-                                {idx + 1}.
-                              </span>
-                              <div className="flex-1">
-                                <h4 className="font-semibold text-text mb-1">
-                                  {exercise.name}
-                                </h4>
-                                <div className="flex gap-4 text-sm text-secondary">
-                                  <span>
-                                    {exercise.sets} × {exercise.reps} reps
-                                  </span>
-                                  {exercise.percentage_of_max && (
-                                    <span>
-                                      @ {exercise.percentage_of_max}%
-                                      {exercise.target_exercise &&
-                                        ` of ${exercise.target_exercise}`}
-                                    </span>
-                                  )}
-                                </div>
-                                {exercise.coach_notes && (
-                                  <p className="text-sm text-secondary mt-2 italic">
-                                    Note: {exercise.coach_notes}
-                                  </p>
-                                )}
-                              </div>
-                            </div>
-                          </div>
-                        ))}
-                    </div>
-                  ) : (
-                    <p className="text-secondary text-sm">No exercises added yet</p>
-                  )}
-                </div>
-              ))}
-            </div>
-          ) : (
+          {/* Program content */}
+          {workoutCount === 0 ? (
             <div className="card text-center py-12">
               <h3 className="text-xl font-heading font-bold text-text mb-2">
                 No Workouts Yet
@@ -279,6 +225,8 @@ export default function ProgramDetailPage() {
                 </Link>
               )}
             </div>
+          ) : (
+            <ProgramDisplay program={programToDisplay(program)} mode="preview" />
           )}
         </main>
 

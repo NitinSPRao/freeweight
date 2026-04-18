@@ -47,9 +47,9 @@ WHAT IS AN EXERCISE vs. A HEADER:
 - Exercise rows: have a name AND sets/reps in at least one column group
 - Section headers: have a label but NO sets/reps anywhere in the row.
   Never include these as exercises.
-- The block name a group of exercises belongs to (e.g. "Strength 1")
-  should be included in each exercise's coach_notes as a prefix:
-  "[Strength 1] original notes here"
+- The block name a group of exercises belongs to (e.g. "Strength 1",
+  "Warm Up", "Power") belongs in each exercise's group_label field.
+  Do NOT include section/block names in coach_notes.
 
 HANDLING ANY FORMAT:
 - Do not assume fixed column positions or row patterns
@@ -177,17 +177,22 @@ Return a JSON object with this exact structure:
 {
   "program_name": "string — infer from filename, sheet names, or content. Use filename as fallback.",
   "description": "string — 1-2 sentence summary of the program",
+  "num_weeks": integer — total number of weeks in the program,
+  "day_mode": "weekday" if days are named Monday/Tuesday/etc, otherwise "offset",
   "workouts": [
     {
       "name": "string — must uniquely identify the week AND day, e.g. 'Block A - Week 1 - Day 1' or '6 Week Phase - Week 2 - Day 3'. Never just 'Day 1' alone since the same day repeats across weeks.",
       "day_offset": integer — 0-indexed sequential day number across the entire program (0, 1, 2...),
+      "week_number": integer — 1-indexed week this workout belongs to (1, 2, 3...),
+      "day_label": "string — day name within the week, e.g. 'Day 1', 'Monday', 'Session A'",
       "description": "string or null — purpose of this workout session if inferable",
       "exercises": [
         {
           "name": "string — clean exercise name only, no sets/reps or load info in the name",
           "sets": integer — must be a whole number,
           "reps": integer — use 1 if time/distance/freeform based,
-          "coach_notes": "string or null — all coaching cues, load prescriptions, freeform rep descriptions, velocity targets, RPE, percentage info",
+          "coach_notes": "string or null — all coaching cues, load prescriptions, freeform rep descriptions, velocity targets, RPE, percentage info. Do NOT include section/block names here.",
+          "group_label": "string or null — the section or block this exercise belongs to (e.g. 'Strength 1', 'Warm Up', 'Power'). Null if the exercise has no section grouping.",
           "order": integer — 0-indexed position within this workout,
           "rest_seconds": integer or null — only if explicitly stated
         }
