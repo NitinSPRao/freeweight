@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useRouter, useParams } from "next/navigation";
 import AuthGuard from "@/components/AuthGuard";
@@ -46,6 +46,26 @@ interface QueueItem {
   coachNotes: string | null;
   groupLabel: string | null;
   colorIndex: number;
+}
+
+interface WorkoutSummaryData {
+  workoutId: number;
+  workoutName: string;
+  scheduledDate: string;
+  completedAt: string;
+  exercises: Array<{
+    id: number;
+    name: string;
+    sets: number;
+    reps: number;
+    group_label: string | null;
+    percentage_of_max?: number;
+    target_exercise?: string;
+  }>;
+  loggedSets: Record<string, SetEntry>;
+  completionNotes: string;
+  totalSets: number;
+  completedTotal: number;
 }
 
 // ─── Color palette — 6 colors, not green (green = primary UI color) ───────────
@@ -123,7 +143,6 @@ export default function WorkoutPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["todayWorkout"] });
       queryClient.invalidateQueries({ queryKey: ["calendar"] });
-      router.push("/athlete/home");
     },
   });
 
@@ -236,6 +255,36 @@ export default function WorkoutPage() {
     logActiveSet(getTargetWeight(exercise) || 0, activeItem.reps, false);
   };
 
+  const completeAllForExercise = (exerciseId: number) => {
+    const exercise = exercises.find((e) => e.id === exerciseId);
+    const targetWeight = getTargetWeight(exercise);
+    const itemsToComplete = queue.filter((item) => item.exerciseId === exerciseId);
+    if (itemsToComplete.length === 0) return;
+
+    const newEntries: Record<string, SetEntry> = {};
+    for (const item of itemsToComplete) {
+      const entry: SetEntry = {
+        exercise_id: item.exerciseId,
+        set_number: item.setNumber,
+        weight_used: targetWeight || 0,
+        reps_completed: item.reps,
+        was_modified: false,
+      };
+      newEntries[`${item.exerciseId}-${item.setNumber}`] = entry;
+      logSetMutation.mutate(entry);
+    }
+
+    setLoggedSets((prev) => ({ ...prev, ...newEntries }));
+    setCompletedItems((prev) => [...prev, ...itemsToComplete]);
+    setQueue((prev) => prev.filter((item) => item.exerciseId !== exerciseId));
+    setShowCustomInput(false);
+
+    const remaining = queue.filter((item) => item.exerciseId !== exerciseId);
+    if (remaining.length === 0) {
+      setPendingRestSeconds(null);
+      setShowCompletionModal(true);
+    }
+  };
 
   // ── Derived values ────────────────────────────────────────────────────────
   const exercises = workout?.exercises || [];
@@ -251,6 +300,18 @@ export default function WorkoutPage() {
   const activeColor = activeItem
     ? EXERCISE_COLORS[activeItem.colorIndex % EXERCISE_COLORS.length]
     : null;
+
+  // For each queue item: should it show the "Complete All" button?
+  // True when it's the first queue item for that exercise AND none of its sets are done yet.
+  const queueCompleteAllFlags = useMemo(() => {
+    const seenIds = new Set<number>();
+    const completedIds = new Set(completedItems.map((ci) => ci.exerciseId));
+    return queue.map((item) => {
+      const isFirst = !seenIds.has(item.exerciseId);
+      seenIds.add(item.exerciseId);
+      return isFirst && !completedIds.has(item.exerciseId);
+    });
+  }, [queue, completedItems]);
 
   // ── Loading / Error ───────────────────────────────────────────────────────
 
@@ -483,12 +544,15 @@ export default function WorkoutPage() {
                   <div className="space-y-1.5">
                     {queue.map((item, idx) => {
                       const exercise = exercises.find((e) => e.id === item.exerciseId);
+                      const showCA = queueCompleteAllFlags[idx] ?? false;
                       return (
                         <SortableQueueItem
                           key={item.id}
                           item={item}
                           isActive={idx === 0}
                           targetWeight={getTargetWeight(exercise)}
+                          showCompleteAll={showCA}
+                          onCompleteAll={showCA ? () => completeAllForExercise(item.exerciseId) : undefined}
                         />
                       );
                     })}
@@ -564,7 +628,34 @@ export default function WorkoutPage() {
                   Back
                 </button>
                 <button
-                  onClick={() => completeWorkoutMutation.mutate(completionNotes || undefined)}
+                  onClick={async () => {
+                    const summaryData: WorkoutSummaryData = {
+                      workoutId,
+                      workoutName: workout.name,
+                      scheduledDate: workout.scheduled_date,
+                      completedAt: new Date().toISOString(),
+                      exercises: exercises.map((e) => ({
+                        id: e.id,
+                        name: e.name,
+                        sets: e.sets,
+                        reps: e.reps,
+                        group_label: e.group_label ?? null,
+                        percentage_of_max: e.percentage_of_max,
+                        target_exercise: e.target_exercise,
+                      })),
+                      loggedSets,
+                      completionNotes,
+                      totalSets,
+                      completedTotal,
+                    };
+                    try {
+                      await completeWorkoutMutation.mutateAsync(completionNotes || undefined);
+                      sessionStorage.setItem("workoutSummary", JSON.stringify(summaryData));
+                      router.push(`/athlete/workout/${workoutId}/summary`);
+                    } catch {
+                      // Mutation error — stay on modal
+                    }
+                  }}
                   disabled={completeWorkoutMutation.isPending}
                   className="btn-primary flex-1"
                 >
@@ -742,10 +833,14 @@ function SortableQueueItem({
   item,
   isActive,
   targetWeight,
+  showCompleteAll,
+  onCompleteAll,
 }: {
   item: QueueItem;
   isActive: boolean;
   targetWeight: number | null;
+  showCompleteAll?: boolean;
+  onCompleteAll?: () => void;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
     useSortable({ id: item.id });
@@ -791,6 +886,18 @@ function SortableQueueItem({
             : ` · ${item.reps} reps`}
         </p>
       </div>
+
+      {/* "Complete All" button — first set of exercise, none done yet */}
+      {showCompleteAll && onCompleteAll && (
+        <button
+          onPointerDown={(e) => e.stopPropagation()}
+          onClick={onCompleteAll}
+          className="text-xs text-secondary/50 hover:text-primary border border-secondary/15 hover:border-primary/40 rounded px-1.5 py-0.5 flex-shrink-0 transition-colors"
+          title={`Complete all ${item.totalSets} sets as planned`}
+        >
+          All ✓
+        </button>
+      )}
 
       {/* "NOW" badge on active set */}
       {isActive && (
