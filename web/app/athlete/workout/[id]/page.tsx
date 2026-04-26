@@ -1,14 +1,30 @@
 "use client";
 
+import { useState, useCallback, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useRouter, useParams } from "next/navigation";
-import { useState, useCallback } from "react";
 import AuthGuard from "@/components/AuthGuard";
 import NavBar from "@/components/NavBar";
-import RestTimer from "@/components/RestTimer";
 import { athleteApi, Exercise, FlagResult } from "@/lib/api-endpoints";
 import { getAuthData } from "@/lib/auth";
 import { calculateTargetWeight } from "@/lib/utils";
+import {
+  DndContext,
+  DragEndEvent,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  closestCenter,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  useSortable,
+  verticalListSortingStrategy,
+  arrayMove,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+
+// ─── Types ────────────────────────────────────────────────────────────────────
 
 interface SetEntry {
   exercise_id: number;
@@ -19,6 +35,32 @@ interface SetEntry {
   was_modified: boolean;
 }
 
+interface QueueItem {
+  id: string;            // `${exerciseId}-${setNumber}` — stable DnD key
+  exerciseId: number;
+  exerciseName: string;
+  setNumber: number;     // 1-indexed within this exercise
+  totalSets: number;
+  reps: number;
+  restSeconds: number;
+  coachNotes: string | null;
+  groupLabel: string | null;
+  colorIndex: number;
+}
+
+// ─── Color palette — 6 colors, not green (green = primary UI color) ───────────
+
+const EXERCISE_COLORS = [
+  { border: "border-blue-400",   bg: "bg-blue-400/10",   text: "text-blue-400"   },
+  { border: "border-orange-400", bg: "bg-orange-400/10", text: "text-orange-400" },
+  { border: "border-purple-400", bg: "bg-purple-400/10", text: "text-purple-400" },
+  { border: "border-teal-400",   bg: "bg-teal-400/10",   text: "text-teal-400"   },
+  { border: "border-pink-400",   bg: "bg-pink-400/10",   text: "text-pink-400"   },
+  { border: "border-yellow-400", bg: "bg-yellow-400/10", text: "text-yellow-400" },
+];
+
+// ─── Main Page ────────────────────────────────────────────────────────────────
+
 export default function WorkoutPage() {
   const router = useRouter();
   const params = useParams();
@@ -26,8 +68,13 @@ export default function WorkoutPage() {
   const { user } = getAuthData();
   const queryClient = useQueryClient();
 
-  const [currentExerciseIndex, setCurrentExerciseIndex] = useState(0);
-  const [currentSetIndex, setCurrentSetIndex] = useState(0);
+  // ── Queue state ───────────────────────────────────────────────────────────
+  const [queue, setQueue] = useState<QueueItem[]>([]);
+  const [completedItems, setCompletedItems] = useState<QueueItem[]>([]);
+  const [queueInitialized, setQueueInitialized] = useState(false);
+  const [showDoneSection, setShowDoneSection] = useState(false);
+
+  // ── UI state ──────────────────────────────────────────────────────────────
   const [loggedSets, setLoggedSets] = useState<Record<string, SetEntry>>({});
   const [showCustomInput, setShowCustomInput] = useState(false);
   const [showFlagModal, setShowFlagModal] = useState(false);
@@ -39,9 +86,11 @@ export default function WorkoutPage() {
   const [completionNotes, setCompletionNotes] = useState("");
   const [showCompletionModal, setShowCompletionModal] = useState(false);
   const [workoutStarted, setWorkoutStarted] = useState(false);
-  const [showRestTimer, setShowRestTimer] = useState(false);
-  const [restDuration, setRestDuration] = useState(90);
+  const [pendingRestSeconds, setPendingRestSeconds] = useState<number | null>(null);
+  const [showRestBanner, setShowRestBanner] = useState(false);
+  const [restBannerDuration, setRestBannerDuration] = useState(90);
 
+  // ── Queries ───────────────────────────────────────────────────────────────
   const { data: workout, isLoading } = useQuery({
     queryKey: ["workout", workoutId],
     queryFn: () => athleteApi.getWorkout(workoutId),
@@ -52,6 +101,7 @@ export default function WorkoutPage() {
     queryFn: () => athleteApi.getProgress(),
   });
 
+  // ── Mutations ─────────────────────────────────────────────────────────────
   const startWorkoutMutation = useMutation({
     mutationFn: () => athleteApi.startWorkout(workoutId),
     onSuccess: () => setWorkoutStarted(true),
@@ -89,10 +139,7 @@ export default function WorkoutPage() {
     },
   });
 
-  const exercises = workout?.exercises || [];
-  const currentExercise = exercises[currentExerciseIndex];
-  const totalExercises = exercises.length;
-
+  // ── Target weight helper ──────────────────────────────────────────────────
   const getTargetWeight = useCallback(
     (exercise: Exercise | undefined) => {
       if (!exercise?.percentage_of_max || !exercise?.target_exercise || !maxes) return null;
@@ -110,79 +157,102 @@ export default function WorkoutPage() {
     [maxes]
   );
 
-  const currentSetKey = currentExercise
-    ? `${currentExercise.id}-${currentSetIndex + 1}`
-    : "";
-  const isCurrentSetLogged = !!loggedSets[currentSetKey];
+  // ── Queue initialization ──────────────────────────────────────────────────
+  useEffect(() => {
+    if (!workout || !workoutStarted || queueInitialized) return;
+    const items: QueueItem[] = [];
+    (workout.exercises || []).forEach((ex, exIdx) => {
+      for (let s = 1; s <= ex.sets; s++) {
+        items.push({
+          id: `${ex.id}-${s}`,
+          exerciseId: ex.id,
+          exerciseName: ex.name,
+          setNumber: s,
+          totalSets: ex.sets,
+          reps: ex.reps,
+          restSeconds: ex.rest_seconds || 90,
+          coachNotes: ex.coach_notes || null,
+          groupLabel: ex.group_label || null,
+          colorIndex: exIdx % EXERCISE_COLORS.length,
+        });
+      }
+    });
+    setQueue(items);
+    setQueueInitialized(true);
+  }, [workout, workoutStarted, queueInitialized]);
 
-  const completedSetsForExercise = currentExercise
-    ? Array.from({ length: currentExercise.sets }, (_, i) => `${currentExercise.id}-${i + 1}`)
-        .filter((k) => loggedSets[k]).length
-    : 0;
-  const allSetsComplete = currentExercise
-    ? completedSetsForExercise >= currentExercise.sets
-    : false;
+  // ── DnD ───────────────────────────────────────────────────────────────────
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } })
+  );
 
-  const totalSets = exercises.reduce((sum, e) => sum + e.sets, 0);
-  const completedTotal = Object.keys(loggedSets).length;
-  const progressPercent = totalSets > 0 ? (completedTotal / totalSets) * 100 : 0;
+  const handleDragEnd = (event: DragEndEvent) => {
+    const { active, over } = event;
+    if (!over || active.id === over.id) return;
+    setQueue((prev) => {
+      const oldIndex = prev.findIndex((item) => item.id === active.id);
+      const newIndex = prev.findIndex((item) => item.id === over.id);
+      if (oldIndex === -1 || newIndex === -1) return prev;
+      return arrayMove(prev, oldIndex, newIndex);
+    });
+    setShowCustomInput(false);
+  };
 
-  const targetWeight = getTargetWeight(currentExercise);
-  const prescribedReps = currentExercise?.reps || 0;
+  // ── Log set ───────────────────────────────────────────────────────────────
+  const logActiveSet = (weight: number, reps: number, wasModified: boolean) => {
+    const activeItem = queue[0];
+    if (!activeItem) return;
 
-  const logCurrentSet = (weight: number, reps: number, wasModified: boolean, rpe?: number) => {
-    if (!currentExercise) return;
     const entry: SetEntry = {
-      exercise_id: currentExercise.id,
-      set_number: currentSetIndex + 1,
+      exercise_id: activeItem.exerciseId,
+      set_number: activeItem.setNumber,
       weight_used: weight,
       reps_completed: reps,
-      rpe,
       was_modified: wasModified,
     };
-    const key = `${currentExercise.id}-${currentSetIndex + 1}`;
+    const key = `${activeItem.exerciseId}-${activeItem.setNumber}`;
     setLoggedSets((prev) => ({ ...prev, [key]: entry }));
     logSetMutation.mutate(entry);
 
-    // Check if we should show rest timer (not last set of exercise)
-    const isLastSetOfExercise = currentSetIndex + 1 >= currentExercise.sets;
+    setQueue((prev) => prev.slice(1));
+    setCompletedItems((prev) => [...prev, activeItem]);
+    setShowCustomInput(false);
 
-    if (!isLastSetOfExercise) {
-      // Show rest timer with coach-prescribed duration or default 90s
-      const duration = currentExercise.rest_seconds || 90;
-      setRestDuration(duration);
-      setShowRestTimer(true);
+    // Offer rest timer if more sets remain; otherwise open completion modal
+    const hasMoreSets = queue.length > 1;
+    if (hasMoreSets) {
+      setShowRestBanner(false);
+      setPendingRestSeconds(activeItem.restSeconds || 90);
     } else {
-      // Auto-advance without timer
-      if (currentExerciseIndex + 1 < totalExercises) {
-        setCurrentExerciseIndex(currentExerciseIndex + 1);
-        setCurrentSetIndex(0);
-        setShowCustomInput(false);
-      } else {
-        setShowCompletionModal(true);
-      }
+      setPendingRestSeconds(null);
+      setShowCompletionModal(true);
     }
   };
 
   const handleCompletedAsPlanned = () => {
-    logCurrentSet(targetWeight || 0, prescribedReps, false);
+    const activeItem = queue[0];
+    if (!activeItem) return;
+    const exercise = workout?.exercises.find((e) => e.id === activeItem.exerciseId);
+    logActiveSet(getTargetWeight(exercise) || 0, activeItem.reps, false);
   };
 
-  const handleRestComplete = () => {
-    setShowRestTimer(false);
-    // Auto-advance to next set
-    setCurrentSetIndex(currentSetIndex + 1);
-    setShowCustomInput(false);
-  };
 
-  const handleSkipRest = () => {
-    setShowRestTimer(false);
-    // Auto-advance to next set
-    setCurrentSetIndex(currentSetIndex + 1);
-    setShowCustomInput(false);
-  };
+  // ── Derived values ────────────────────────────────────────────────────────
+  const exercises = workout?.exercises || [];
+  const totalSets = exercises.reduce((sum, e) => sum + e.sets, 0);
+  const completedTotal = completedItems.length;
+  const progressPercent = totalSets > 0 ? (completedTotal / totalSets) * 100 : 0;
 
-  // ─── Loading / Error ──────────────────────────────────────────────────────
+  const activeItem = queue[0] ?? null;
+  const activeExercise = activeItem
+    ? exercises.find((e) => e.id === activeItem.exerciseId)
+    : undefined;
+  const activeTargetWeight = getTargetWeight(activeExercise);
+  const activeColor = activeItem
+    ? EXERCISE_COLORS[activeItem.colorIndex % EXERCISE_COLORS.length]
+    : null;
+
+  // ── Loading / Error ───────────────────────────────────────────────────────
 
   if (isLoading) {
     return (
@@ -209,7 +279,7 @@ export default function WorkoutPage() {
     );
   }
 
-  // ─── Pre-start Screen ─────────────────────────────────────────────────────
+  // ── Pre-start Screen (unchanged) ──────────────────────────────────────────
 
   if (!workoutStarted && !workout.workout_log_id) {
     return (
@@ -246,32 +316,32 @@ export default function WorkoutPage() {
     );
   }
 
-  // Auto-mark started if resuming
+  // Auto-mark started if resuming a workout that already has a log
   if (!workoutStarted && workout.workout_log_id) {
     setWorkoutStarted(true);
   }
 
-  // ─── Active Workout ───────────────────────────────────────────────────────
+  // ── Active Workout ────────────────────────────────────────────────────────
 
   return (
     <AuthGuard requiredUserType="athlete">
       <div className="min-h-screen bg-background">
         <NavBar userName={user?.name || ""} userType="athlete" />
 
-        <main className="max-w-2xl mx-auto px-4 py-8">
-          {/* Header + Progress */}
-          <div className="mb-6">
+        <main className="max-w-2xl mx-auto px-4 py-6 pb-12">
+
+          {/* ── Header + Progress bar ─────────────────────────────────────── */}
+          <div className="mb-5">
             <div className="flex justify-between items-start mb-3">
               <div>
-                <h1 className="text-2xl font-heading font-bold text-text">{workout.name}</h1>
+                <h1 className="text-xl font-heading font-bold text-text">{workout.name}</h1>
                 <p className="text-secondary text-sm">
-                  Exercise {currentExerciseIndex + 1}/{totalExercises} &middot;
-                  Set {Math.min(currentSetIndex + 1, currentExercise?.sets || 1)}/{currentExercise?.sets || 0}
+                  {completedTotal} / {totalSets} sets done
                 </p>
               </div>
               <button
                 onClick={() => setShowFlagModal(true)}
-                className="flex items-center gap-1.5 border border-red-400 text-red-400 rounded-lg px-3 py-1 text-sm hover:bg-red-400/10 transition-colors"
+                className="flex items-center gap-1.5 border border-red-400 text-red-400 rounded-lg px-3 py-1 text-sm hover:bg-red-400/10 transition-colors flex-shrink-0"
               >
                 <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
@@ -289,157 +359,190 @@ export default function WorkoutPage() {
             </div>
           </div>
 
-          {currentExercise && (
-            <div className="space-y-4">
-              {/* Exercise Info */}
-              <div className="card">
-                <h2 className="text-2xl font-heading font-bold text-text mb-2">
-                  {currentExercise.name}
-                </h2>
-                <div className="flex gap-6 mb-3">
-                  <div>
-                    <span className="text-secondary text-xs block">Prescribed</span>
-                    <span className="text-text font-semibold">
-                      {currentExercise.sets} &times; {currentExercise.reps}
-                    </span>
+          {/* ── Section 1: Current Set Card ───────────────────────────────── */}
+          {activeItem && activeColor ? (
+            <div className="mb-6">
+              {/* Group label chip */}
+              {activeItem.groupLabel && (
+                <div className="mb-2">
+                  <span
+                    className={`inline-block text-xs font-bold uppercase tracking-wider px-2.5 py-1 rounded-full ${activeColor.bg} ${activeColor.text}`}
+                  >
+                    {activeItem.groupLabel}
+                  </span>
+                </div>
+              )}
+
+              {/* Card */}
+              <div className={`rounded-xl border-l-[6px] ${activeColor.border} ${activeColor.bg} p-5`}>
+                <div className="flex justify-between items-start mb-1">
+                  <h2 className={`text-2xl font-heading font-bold ${activeColor.text}`}>
+                    {activeItem.exerciseName}
+                  </h2>
+                  <span className="text-secondary text-sm flex-shrink-0 mt-1.5">
+                    Set {activeItem.setNumber} / {activeItem.totalSets}
+                  </span>
+                </div>
+
+                <p className="text-text text-lg font-semibold mb-5">
+                  {activeTargetWeight !== null
+                    ? `${activeTargetWeight} lbs × ${activeItem.reps} reps`
+                    : `${activeItem.reps} reps`}
+                </p>
+
+                {/* Action buttons */}
+                {!showCustomInput ? (
+                  <div className="space-y-2">
+                    <button
+                      onClick={handleCompletedAsPlanned}
+                      className="w-full bg-primary text-background font-bold py-4 px-6 rounded-xl text-base hover:opacity-90 transition-opacity"
+                    >
+                      Completed as Planned
+                      <span className="block text-sm font-normal mt-0.5 opacity-80">
+                        {activeTargetWeight !== null
+                          ? `${activeTargetWeight} lbs`
+                          : "Bodyweight"}{" "}
+                        × {activeItem.reps} reps
+                      </span>
+                    </button>
+                    <button
+                      onClick={() => setShowCustomInput(true)}
+                      className="w-full border border-secondary/40 text-secondary font-medium py-2.5 px-6 rounded-xl text-sm hover:text-text hover:border-secondary transition-colors"
+                    >
+                      I did something different
+                    </button>
                   </div>
-                  {targetWeight !== null && (
-                    <div>
-                      <span className="text-secondary text-xs block">Target Weight</span>
-                      <span className="text-primary font-bold text-lg">
-                        {targetWeight} lbs
-                      </span>
-                      <span className="text-secondary text-xs ml-1">
-                        ({Math.round((currentExercise.percentage_of_max || 0) * 100)}%)
-                      </span>
+                ) : (
+                  <CustomSetInput
+                    defaultWeight={activeTargetWeight || 0}
+                    defaultReps={activeItem.reps}
+                    onLog={(weight, reps) => logActiveSet(weight, reps, true)}
+                    onCancel={() => setShowCustomInput(false)}
+                  />
+                )}
+
+                {/* Rest timer offer */}
+                {pendingRestSeconds !== null && (
+                  <button
+                    onClick={() => {
+                      setRestBannerDuration(pendingRestSeconds);
+                      setPendingRestSeconds(null);
+                      setShowRestBanner(true);
+                    }}
+                    className="mt-3 w-full border border-secondary/30 text-secondary text-sm font-medium py-2 px-4 rounded-xl hover:border-secondary/60 hover:text-text transition-colors"
+                  >
+                    Start Rest Timer ({pendingRestSeconds}s)
+                  </button>
+                )}
+
+                {/* Coach notes */}
+                {activeItem.coachNotes && (
+                  <div className="mt-4 bg-background/50 rounded-lg p-3">
+                    <p className="text-secondary text-xs mb-0.5">Coach Notes</p>
+                    <p className="text-text text-sm">{activeItem.coachNotes}</p>
+                  </div>
+                )}
+              </div>
+            </div>
+          ) : queueInitialized && queue.length === 0 && completedItems.length > 0 ? (
+            /* All sets finished */
+            <div className="mb-6 card text-center py-10">
+              <p className="text-primary font-bold text-xl mb-1">All sets complete!</p>
+              <p className="text-secondary text-sm mb-5">
+                {completedTotal} / {totalSets} sets done
+              </p>
+              <button onClick={() => setShowCompletionModal(true)} className="btn-primary">
+                Finish Workout
+              </button>
+            </div>
+          ) : null}
+
+          {/* ── Section 2: Set Queue ──────────────────────────────────────── */}
+          {queueInitialized && (queue.length > 0 || completedItems.length > 0) && (
+            <div>
+              {/* Queue header */}
+              {queue.length > 0 && (
+                <div className="flex items-center justify-between mb-3">
+                  <h3 className="text-xs font-semibold text-secondary uppercase tracking-wider">
+                    Queue
+                  </h3>
+                  <span className="text-xs text-secondary">{queue.length} remaining</span>
+                </div>
+              )}
+
+              {/* Sortable pending sets */}
+              <DndContext
+                sensors={sensors}
+                collisionDetection={closestCenter}
+                onDragEnd={handleDragEnd}
+              >
+                <SortableContext
+                  items={queue.map((item) => item.id)}
+                  strategy={verticalListSortingStrategy}
+                >
+                  <div className="space-y-1.5">
+                    {queue.map((item, idx) => {
+                      const exercise = exercises.find((e) => e.id === item.exerciseId);
+                      return (
+                        <SortableQueueItem
+                          key={item.id}
+                          item={item}
+                          isActive={idx === 0}
+                          targetWeight={getTargetWeight(exercise)}
+                        />
+                      );
+                    })}
+                  </div>
+                </SortableContext>
+              </DndContext>
+
+              {/* Done section (collapsed by default) */}
+              {completedItems.length > 0 && (
+                <div className="mt-4">
+                  <button
+                    onClick={() => setShowDoneSection((v) => !v)}
+                    className="flex items-center gap-2 w-full text-left py-1 text-xs font-semibold text-secondary uppercase tracking-wider"
+                  >
+                    <span className="text-primary">✓</span>
+                    Done ({completedItems.length})
+                    <span className="ml-auto">{showDoneSection ? "▲" : "▼"}</span>
+                  </button>
+
+                  {showDoneSection && (
+                    <div className="space-y-1.5 mt-2">
+                      {completedItems.map((item) => {
+                        const color = EXERCISE_COLORS[item.colorIndex % EXERCISE_COLORS.length];
+                        const logEntry = loggedSets[`${item.exerciseId}-${item.setNumber}`];
+                        return (
+                          <div
+                            key={`done-${item.id}`}
+                            className={`flex items-center gap-3 px-3 py-2.5 rounded-lg border-l-4 ${color.border} bg-background/30 opacity-50`}
+                          >
+                            <span className="text-primary text-xs flex-shrink-0">✓</span>
+                            <div className="flex-1 min-w-0">
+                              <span className="text-xs text-secondary line-through">
+                                {item.exerciseName}
+                              </span>
+                              <span className="text-secondary/60 text-xs ml-2">
+                                Set {item.setNumber}
+                                {logEntry
+                                  ? ` · ${logEntry.weight_used} lbs × ${logEntry.reps_completed}`
+                                  : ""}
+                                {logEntry?.was_modified ? " ✱" : ""}
+                              </span>
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
                   )}
                 </div>
-                {currentExercise.coach_notes && (
-                  <div className="bg-background rounded-lg p-3">
-                    <p className="text-secondary text-xs mb-0.5">Coach Notes</p>
-                    <p className="text-text text-sm">{currentExercise.coach_notes}</p>
-                  </div>
-                )}
-              </div>
-
-              {/* Set Progress Dots */}
-              <div className="flex justify-center gap-2">
-                {Array.from({ length: currentExercise.sets }, (_, i) => {
-                  const key = `${currentExercise.id}-${i + 1}`;
-                  const logged = loggedSets[key];
-                  const isCurrent = i === currentSetIndex && !isCurrentSetLogged;
-                  return (
-                    <button
-                      key={i}
-                      onClick={() => {
-                        setCurrentSetIndex(i);
-                        setShowCustomInput(false);
-                      }}
-                      className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold transition-all ${
-                        logged
-                          ? logged.was_modified
-                            ? "bg-yellow-400 text-background"
-                            : "bg-primary text-background"
-                          : isCurrent
-                          ? "border-2 border-primary text-primary"
-                          : "border-2 border-secondary/40 text-secondary"
-                      }`}
-                    >
-                      {i + 1}
-                    </button>
-                  );
-                })}
-              </div>
-
-              {/* Action Area */}
-              {!isCurrentSetLogged && !showCustomInput && (
-                <div className="space-y-3">
-                  {/* COMPLETED AS PLANNED — Primary action */}
-                  <button
-                    onClick={handleCompletedAsPlanned}
-                    className="w-full bg-primary text-background font-bold py-5 px-6 rounded-xl text-lg hover:opacity-90 transition-opacity"
-                  >
-                    Completed as Planned
-                    <span className="block text-sm font-normal mt-1 opacity-80">
-                      {targetWeight !== null ? `${targetWeight} lbs` : "Bodyweight"} &times; {prescribedReps} reps
-                    </span>
-                  </button>
-
-                  {/* Different — Secondary */}
-                  <button
-                    onClick={() => setShowCustomInput(true)}
-                    className="w-full border border-secondary/40 text-secondary font-medium py-3 px-6 rounded-xl text-sm hover:text-text hover:border-secondary transition-colors"
-                  >
-                    I did something different
-                  </button>
-                </div>
               )}
-
-              {/* Custom Input */}
-              {!isCurrentSetLogged && showCustomInput && (
-                <CustomSetInput
-                  defaultWeight={targetWeight || 0}
-                  defaultReps={prescribedReps}
-                  onLog={(weight, reps) => logCurrentSet(weight, reps, true)}
-                  onCancel={() => setShowCustomInput(false)}
-                />
-              )}
-
-              {/* Set already logged */}
-              {isCurrentSetLogged && (
-                <div className="card bg-primary/5 border-primary/30 text-center py-6">
-                  <p className="text-primary font-bold text-lg mb-1">Set {currentSetIndex + 1} Logged</p>
-                  <p className="text-text">
-                    {loggedSets[currentSetKey].weight_used} lbs &times;{" "}
-                    {loggedSets[currentSetKey].reps_completed} reps
-                    {loggedSets[currentSetKey].was_modified && (
-                      <span className="text-yellow-400 text-sm ml-2">(modified)</span>
-                    )}
-                  </p>
-                </div>
-              )}
-
-              {/* Exercise Navigation */}
-              <div className="flex gap-3 pt-2">
-                {currentExerciseIndex > 0 && (
-                  <button
-                    onClick={() => {
-                      setCurrentExerciseIndex(currentExerciseIndex - 1);
-                      setCurrentSetIndex(0);
-                      setShowCustomInput(false);
-                    }}
-                    className="btn-secondary flex-1"
-                  >
-                    &larr; Prev Exercise
-                  </button>
-                )}
-                {allSetsComplete && currentExerciseIndex < totalExercises - 1 && (
-                  <button
-                    onClick={() => {
-                      setCurrentExerciseIndex(currentExerciseIndex + 1);
-                      setCurrentSetIndex(0);
-                      setShowCustomInput(false);
-                    }}
-                    className="btn-primary flex-1"
-                  >
-                    Next Exercise &rarr;
-                  </button>
-                )}
-                {allSetsComplete && currentExerciseIndex === totalExercises - 1 && (
-                  <button
-                    onClick={() => setShowCompletionModal(true)}
-                    className="btn-primary flex-1"
-                  >
-                    Finish Workout
-                  </button>
-                )}
-              </div>
             </div>
           )}
         </main>
 
-        {/* Completion Modal */}
+        {/* ── Completion Modal (unchanged) ───────────────────────────────── */}
         {showCompletionModal && (
           <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
             <div className="bg-[#1F2937] rounded-lg p-6 max-w-md w-full">
@@ -472,145 +575,160 @@ export default function WorkoutPage() {
           </div>
         )}
 
-        {/* Flag Modal */}
-        {showFlagModal && (() => {
-          const closeFlagModal = () => {
-            setShowFlagModal(false);
-            setFlagReason("");
-            setFlagOptInRehab(false);
-            setFlagRehabTarget("");
-            setFlagSubmitted(false);
-            setFlagResult(null);
-          };
-
-          return (
-            <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
-              <div className="bg-[#1F2937] rounded-lg p-6 max-w-md w-full max-h-[90vh] overflow-y-auto">
-                {flagSubmitted ? (
-                  /* Confirmation screen */
-                  <div>
-                    <h3 className="text-xl font-heading font-bold text-text mb-1">Report Submitted</h3>
-                    <p className="text-secondary text-sm mb-3">
-                      {!flagOptInRehab || flagResult === null ? (
-                        "Your coach has been notified and will follow up with you."
-                      ) : flagResult.matched && flagResult.confidence === "high" ? (
-                        <>A recovery plan has been matched: <span className="text-text font-medium">'{flagResult.program_name}'</span> has been added to your dashboard.</>
-                      ) : flagResult.matched && flagResult.confidence === "medium" ? (
-                        <><span className="text-text font-medium">'{flagResult.program_name}'</span> has been added to your dashboard. Your coach will review to confirm it is the right fit.</>
-                      ) : (
-                        "Your coach has been notified and will assign a recovery plan manually."
-                      )}
-                    </p>
-                    <div className="flex gap-3 mt-6">
-                      <button
-                        onClick={() => router.push("/athlete/home")}
-                        className="btn-secondary flex-1"
-                      >
-                        End Workout
-                      </button>
-                      <button
-                        onClick={closeFlagModal}
-                        className="btn-primary flex-1"
-                      >
-                        Continue Workout
-                      </button>
-                    </div>
-                  </div>
-                ) : (
-                  /* Flag form */
-                  <div>
-                    <h3 className="text-xl font-heading font-bold text-text mb-1">Report Concern</h3>
-                    <p className="text-secondary text-sm mb-5">Your coach will be notified and will follow up with you.</p>
-
-                    {/* Section 1 — What happened? */}
-                    <div className="mb-5">
-                      <textarea
-                        value={flagReason}
-                        onChange={(e) => setFlagReason(e.target.value)}
-                        placeholder="Describe what happened..."
-                        className="input-field min-h-[100px]"
-                      />
-                    </div>
-
-                    <hr className="border-secondary/20" />
-
-                    {/* Section 2 — Recovery */}
-                    <div className="mt-5 mb-5">
-                      <p className="text-xs font-medium text-secondary uppercase tracking-wider mb-3">Recovery</p>
-                      <p className="text-sm text-text mb-2">Would you like a recovery plan?</p>
-                      <div className="flex gap-2">
+        {/* ── Flag Modal (unchanged) ─────────────────────────────────────── */}
+        {showFlagModal &&
+          (() => {
+            const closeFlagModal = () => {
+              setShowFlagModal(false);
+              setFlagReason("");
+              setFlagOptInRehab(false);
+              setFlagRehabTarget("");
+              setFlagSubmitted(false);
+              setFlagResult(null);
+            };
+            return (
+              <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+                <div className="bg-[#1F2937] rounded-lg p-6 max-w-md w-full max-h-[90vh] overflow-y-auto">
+                  {flagSubmitted ? (
+                    <div>
+                      <h3 className="text-xl font-heading font-bold text-text mb-1">
+                        Report Submitted
+                      </h3>
+                      <p className="text-secondary text-sm mb-3">
+                        {!flagOptInRehab || flagResult === null ? (
+                          "Your coach has been notified and will follow up with you."
+                        ) : flagResult.matched && flagResult.confidence === "high" ? (
+                          <>
+                            A recovery plan has been matched:{" "}
+                            <span className="text-text font-medium">
+                              &apos;{flagResult.program_name}&apos;
+                            </span>{" "}
+                            has been added to your dashboard.
+                          </>
+                        ) : flagResult.matched && flagResult.confidence === "medium" ? (
+                          <>
+                            <span className="text-text font-medium">
+                              &apos;{flagResult.program_name}&apos;
+                            </span>{" "}
+                            has been added to your dashboard. Your coach will review to confirm it
+                            is the right fit.
+                          </>
+                        ) : (
+                          "Your coach has been notified and will assign a recovery plan manually."
+                        )}
+                      </p>
+                      <div className="flex gap-3 mt-6">
                         <button
-                          onClick={() => setFlagOptInRehab(true)}
-                          className={`flex-1 py-2 px-3 rounded-lg text-sm font-medium transition-colors ${
-                            flagOptInRehab
-                              ? "bg-amber-400 text-zinc-900"
-                              : "bg-zinc-800 text-secondary hover:text-text"
-                          }`}
+                          onClick={() => router.push("/athlete/home")}
+                          className="btn-secondary flex-1"
                         >
-                          Yes, request a plan
+                          End Workout
                         </button>
-                        <button
-                          onClick={() => { setFlagOptInRehab(false); setFlagRehabTarget(""); }}
-                          className={`flex-1 py-2 px-3 rounded-lg text-sm font-medium transition-colors ${
-                            !flagOptInRehab
-                              ? "bg-zinc-700 text-text"
-                              : "bg-zinc-800 text-secondary hover:text-text"
-                          }`}
-                        >
-                          No thanks
+                        <button onClick={closeFlagModal} className="btn-primary flex-1">
+                          Continue Workout
                         </button>
                       </div>
-                      {flagOptInRehab && (
-                        <div className="mt-3">
-                          <label className="block text-sm font-medium text-text mb-1">
-                            What would you like to focus on?
-                          </label>
-                          <textarea
-                            value={flagRehabTarget}
-                            onChange={(e) => setFlagRehabTarget(e.target.value)}
-                            placeholder="e.g. tight hip flexors, lower back tightness, shoulder discomfort when pressing"
-                            className="input-field text-sm min-h-[80px] resize-y"
-                          />
-                          <p className="mt-1.5 text-xs text-secondary">
-                            Be as specific as you can — this helps us find the right program for you.
-                          </p>
+                    </div>
+                  ) : (
+                    <div>
+                      <h3 className="text-xl font-heading font-bold text-text mb-1">
+                        Report Concern
+                      </h3>
+                      <p className="text-secondary text-sm mb-5">
+                        Your coach will be notified and will follow up with you.
+                      </p>
+                      <div className="mb-5">
+                        <textarea
+                          value={flagReason}
+                          onChange={(e) => setFlagReason(e.target.value)}
+                          placeholder="Describe what happened..."
+                          className="input-field min-h-[100px]"
+                        />
+                      </div>
+                      <hr className="border-secondary/20" />
+                      <div className="mt-5 mb-5">
+                        <p className="text-xs font-medium text-secondary uppercase tracking-wider mb-3">
+                          Recovery
+                        </p>
+                        <p className="text-sm text-text mb-2">Would you like a recovery plan?</p>
+                        <div className="flex gap-2">
+                          <button
+                            onClick={() => setFlagOptInRehab(true)}
+                            className={`flex-1 py-2 px-3 rounded-lg text-sm font-medium transition-colors ${
+                              flagOptInRehab
+                                ? "bg-amber-400 text-zinc-900"
+                                : "bg-zinc-800 text-secondary hover:text-text"
+                            }`}
+                          >
+                            Yes, request a plan
+                          </button>
+                          <button
+                            onClick={() => {
+                              setFlagOptInRehab(false);
+                              setFlagRehabTarget("");
+                            }}
+                            className={`flex-1 py-2 px-3 rounded-lg text-sm font-medium transition-colors ${
+                              !flagOptInRehab
+                                ? "bg-zinc-700 text-text"
+                                : "bg-zinc-800 text-secondary hover:text-text"
+                            }`}
+                          >
+                            No thanks
+                          </button>
                         </div>
-                      )}
+                        {flagOptInRehab && (
+                          <div className="mt-3">
+                            <label className="block text-sm font-medium text-text mb-1">
+                              What would you like to focus on?
+                            </label>
+                            <textarea
+                              value={flagRehabTarget}
+                              onChange={(e) => setFlagRehabTarget(e.target.value)}
+                              placeholder="e.g. tight hip flexors, lower back tightness, shoulder discomfort when pressing"
+                              className="input-field text-sm min-h-[80px] resize-y"
+                            />
+                            <p className="mt-1.5 text-xs text-secondary">
+                              Be as specific as you can — this helps us find the right program for
+                              you.
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                      <div className="flex gap-3">
+                        <button onClick={closeFlagModal} className="btn-secondary flex-1">
+                          Cancel
+                        </button>
+                        <button
+                          onClick={() =>
+                            flagWorkoutMutation.mutate({
+                              reason: flagReason,
+                              opt_in_rehab: flagOptInRehab,
+                              rehab_target: flagRehabTarget || null,
+                            })
+                          }
+                          disabled={!flagReason.trim() || flagWorkoutMutation.isPending}
+                          className="btn-primary flex-1"
+                        >
+                          {flagWorkoutMutation.isPending ? "Submitting…" : "Submit Flag"}
+                        </button>
+                      </div>
                     </div>
-
-                    {/* Actions */}
-                    <div className="flex gap-3">
-                      <button onClick={closeFlagModal} className="btn-secondary flex-1">
-                        Cancel
-                      </button>
-                      <button
-                        onClick={() =>
-                          flagWorkoutMutation.mutate({
-                            reason: flagReason,
-                            opt_in_rehab: flagOptInRehab,
-                            rehab_target: flagRehabTarget || null,
-                          })
-                        }
-                        disabled={!flagReason.trim() || flagWorkoutMutation.isPending}
-                        className="btn-primary flex-1"
-                      >
-                        {flagWorkoutMutation.isPending ? "Submitting…" : "Submit Flag"}
-                      </button>
-                    </div>
-                  </div>
-                )}
+                  )}
+                </div>
               </div>
-            </div>
-          );
-        })()}
+            );
+          })()}
 
-        {/* Rest Timer */}
-        {showRestTimer && currentExercise && (
-          <RestTimer
-            durationSeconds={restDuration}
-            nextSetInfo={`Set ${currentSetIndex + 2}/${currentExercise.sets}`}
-            onComplete={handleRestComplete}
-            onSkip={handleSkipRest}
+        {/* ── Rest Timer Banner ─────────────────────────────────────────── */}
+        {showRestBanner && (
+          <RestTimerBanner
+            durationSeconds={restBannerDuration}
+            nextSetInfo={
+              queue[0]
+                ? `${queue[0].exerciseName} — Set ${queue[0].setNumber}/${queue[0].totalSets}`
+                : undefined
+            }
+            onDismiss={() => setShowRestBanner(false)}
           />
         )}
       </div>
@@ -618,8 +736,138 @@ export default function WorkoutPage() {
   );
 }
 
+// ─── SortableQueueItem ────────────────────────────────────────────────────────
 
-// ─── Custom Set Input ───────────────────────────────────────────────────────
+function SortableQueueItem({
+  item,
+  isActive,
+  targetWeight,
+}: {
+  item: QueueItem;
+  isActive: boolean;
+  targetWeight: number | null;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
+    useSortable({ id: item.id });
+
+  const color = EXERCISE_COLORS[item.colorIndex % EXERCISE_COLORS.length];
+
+  return (
+    <div
+      ref={setNodeRef}
+      style={{
+        transform: CSS.Transform.toString(transform),
+        transition,
+        opacity: isDragging ? 0.4 : 1,
+      }}
+      className={[
+        "flex items-center gap-3 px-3 py-2.5 rounded-lg border-l-4 transition-colors",
+        color.border,
+        isActive
+          ? `${color.bg} ring-1 ring-primary/60`
+          : "bg-background/50",
+      ].join(" ")}
+    >
+      {/* Drag handle */}
+      <button
+        {...attributes}
+        {...listeners}
+        className="cursor-grab text-secondary/30 hover:text-secondary/60 flex-shrink-0 touch-none select-none"
+        tabIndex={-1}
+        aria-label="Drag to reorder"
+      >
+        ⠿
+      </button>
+
+      {/* Set info */}
+      <div className="flex-1 min-w-0">
+        <p className={`text-sm font-semibold truncate ${isActive ? color.text : "text-text"}`}>
+          {item.exerciseName}
+        </p>
+        <p className="text-xs text-secondary">
+          Set {item.setNumber}/{item.totalSets}
+          {targetWeight !== null
+            ? ` · ${targetWeight} lbs × ${item.reps}`
+            : ` · ${item.reps} reps`}
+        </p>
+      </div>
+
+      {/* "NOW" badge on active set */}
+      {isActive && (
+        <span className={`text-xs font-bold flex-shrink-0 ${color.text}`}>NOW</span>
+      )}
+    </div>
+  );
+}
+
+// ─── RestTimerBanner ─────────────────────────────────────────────────────────
+
+function RestTimerBanner({
+  durationSeconds,
+  nextSetInfo,
+  onDismiss,
+}: {
+  durationSeconds: number;
+  nextSetInfo?: string;
+  onDismiss: () => void;
+}) {
+  const [secondsLeft, setSecondsLeft] = useState(durationSeconds);
+
+  useEffect(() => {
+    if (secondsLeft <= 0) return;
+    const id = setInterval(() => setSecondsLeft((s) => s - 1), 1000);
+    return () => clearInterval(id);
+  }, [secondsLeft]);
+
+  const mins = Math.floor(secondsLeft / 60);
+  const secs = secondsLeft % 60;
+  const display = `${mins}:${secs.toString().padStart(2, "0")}`;
+  const expired = secondsLeft <= 0;
+
+  return (
+    <div className="fixed bottom-4 left-4 right-4 z-40 max-w-2xl mx-auto">
+      <div className="bg-[#1F2937] border border-secondary/20 rounded-xl px-4 py-3 flex items-center gap-3 shadow-lg">
+        {/* Countdown */}
+        <span className={`text-2xl font-mono font-bold flex-shrink-0 tabular-nums ${expired ? "text-primary" : "text-text"}`}>
+          {expired ? "Done" : display}
+        </span>
+
+        {/* Next set info */}
+        <div className="flex-1 min-w-0">
+          <p className="text-xs text-secondary truncate">Rest</p>
+          {nextSetInfo && (
+            <p className="text-xs text-text truncate">{nextSetInfo}</p>
+          )}
+        </div>
+
+        {/* ±15s controls */}
+        <button
+          onClick={() => setSecondsLeft((s) => Math.max(0, s - 15))}
+          className="text-secondary hover:text-text text-xs px-2 py-1 rounded border border-secondary/20 hover:border-secondary/40 transition-colors flex-shrink-0"
+        >
+          −15s
+        </button>
+        <button
+          onClick={() => setSecondsLeft((s) => s + 15)}
+          className="text-secondary hover:text-text text-xs px-2 py-1 rounded border border-secondary/20 hover:border-secondary/40 transition-colors flex-shrink-0"
+        >
+          +15s
+        </button>
+
+        {/* Dismiss */}
+        <button
+          onClick={onDismiss}
+          className="text-secondary/50 hover:text-secondary text-lg leading-none flex-shrink-0 ml-1"
+          aria-label="Dismiss timer"
+        >
+          ×
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ─── CustomSetInput (unchanged) ───────────────────────────────────────────────
 
 function CustomSetInput({
   defaultWeight,
@@ -636,7 +884,7 @@ function CustomSetInput({
   const [reps, setReps] = useState(defaultReps.toString());
 
   return (
-    <div className="card space-y-3">
+    <div className="mt-3 space-y-3">
       <h4 className="text-sm font-medium text-text">Log Actual Set</h4>
       <div className="grid grid-cols-2 gap-3">
         <div>
