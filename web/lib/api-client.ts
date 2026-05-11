@@ -1,6 +1,11 @@
 import axios from "axios";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+const FALLBACK_API_URL =
+  typeof window !== "undefined" && window.location.hostname === "localhost"
+    ? "http://localhost:8000"
+    : "https://freeweight-prod.onrender.com";
+
+const API_URL = process.env.NEXT_PUBLIC_API_URL || FALLBACK_API_URL;
 
 export const apiClient = axios.create({
   baseURL: API_URL,
