@@ -128,17 +128,7 @@ export default function AthleteOnboardingPage() {
       localStorage.removeItem("has_coach");
       router.push("/athlete/home");
     } catch (err: any) {
-      console.error("Athlete onboarding submit failed:", {
-        status: err?.response?.status,
-        data: err?.response?.data,
-        message: err?.message,
-        url: err?.config?.url,
-      });
-      const status = err?.response?.status;
-      const fallback = status
-        ? `Something went wrong (${status}). Please try again.`
-        : "Could not reach the server. Check your connection and try again.";
-      setError(extractErrorMessage(err, fallback));
+      setError(extractErrorMessage(err, "Something went wrong. Please try again."));
     } finally {
       setLoading(false);
     }
