@@ -681,54 +681,65 @@ def import_program(
     current_coach: User = Depends(get_current_coach),
     db: Session = Depends(get_db),
 ):
-    """Save an AI-parsed workout program to the database."""
-    program = Program(
-        name=data.program_name,
-        description=data.description,
-        coach_id=current_coach.id,
-        program_type=data.program_type or "strength",
-        body_regions=data.body_regions or None,
-        num_weeks=data.num_weeks if not data.is_ongoing else None,
-        day_mode=data.day_mode or "offset",
-        folder_id=data.folder_id,
-        is_ongoing=data.is_ongoing or False,
-        same_every_week=data.same_every_week or False,
-    )
-    db.add(program)
-    db.flush()  # get program.id before creating workouts
-
-    exercise_count = 0
-    now = datetime.now(timezone.utc)
-
-    for w_data in data.workouts:
-        workout = Workout(
-            program_id=program.id,
-            name=w_data.name,
-            day_offset=w_data.day_offset,
-            week_number=w_data.week_number,
-            day_label=w_data.day_label,
-            description=w_data.description,
-            scheduled_date=now + timedelta(days=w_data.day_offset),
+    """Save a workout program (from manual create or AI parse) to the database."""
+    try:
+        program = Program(
+            name=data.program_name,
+            description=data.description,
+            coach_id=current_coach.id,
+            program_type=data.program_type or "strength",
+            body_regions=data.body_regions or None,
+            num_weeks=data.num_weeks if not data.is_ongoing else None,
+            day_mode=data.day_mode or "offset",
+            folder_id=data.folder_id,
+            is_ongoing=data.is_ongoing or False,
+            same_every_week=data.same_every_week or False,
         )
-        db.add(workout)
-        db.flush()  # get workout.id before creating exercises
+        db.add(program)
+        db.flush()  # get program.id before creating workouts
 
-        for e_data in w_data.exercises:
-            exercise = Exercise(
-                workout_id=workout.id,
-                name=e_data.name,
-                sets=e_data.sets,
-                reps=e_data.reps,
-                coach_notes=e_data.coach_notes,
-                order=e_data.order,
-                rest_seconds=e_data.rest_seconds,
-                group_label=e_data.group_label,
-                video_url=e_data.video_url,
+        exercise_count = 0
+        now = datetime.now(timezone.utc)
+
+        for w_data in data.workouts:
+            workout = Workout(
+                program_id=program.id,
+                name=w_data.name,
+                day_offset=w_data.day_offset,
+                week_number=w_data.week_number,
+                day_label=w_data.day_label,
+                description=w_data.description,
+                scheduled_date=now + timedelta(days=w_data.day_offset),
             )
-            db.add(exercise)
-            exercise_count += 1
+            db.add(workout)
+            db.flush()  # get workout.id before creating exercises
 
-    db.commit()
+            for e_data in w_data.exercises:
+                exercise = Exercise(
+                    workout_id=workout.id,
+                    name=e_data.name,
+                    sets=e_data.sets,
+                    reps=e_data.reps,
+                    coach_notes=e_data.coach_notes,
+                    order=e_data.order,
+                    rest_seconds=e_data.rest_seconds,
+                    group_label=e_data.group_label,
+                    video_url=e_data.video_url,
+                )
+                db.add(exercise)
+                exercise_count += 1
+
+        db.commit()
+    except Exception:
+        db.rollback()
+        logger.exception(
+            "import_program failed for coach %s, program_name=%r, %d workouts",
+            current_coach.id, data.program_name, len(data.workouts),
+        )
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to save program. Check server logs for details.",
+        )
 
     return {
         "program_id": program.id,
