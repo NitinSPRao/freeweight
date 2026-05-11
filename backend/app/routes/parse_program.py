@@ -4,7 +4,7 @@ from typing import Optional
 import io
 import json
 import openpyxl
-from google import genai
+from openai import OpenAI
 
 from ..auth import get_current_coach
 from ..models import User
@@ -204,24 +204,28 @@ Return a JSON object with this exact structure:
   ]
 }"""
 
-    if not settings.gemini_api_key:
-        logger.error("parse_program: gemini_api_key is not configured")
+    if not settings.openai_api_key:
+        logger.error("parse_program: openai_api_key is not configured")
         raise HTTPException(
             status_code=500,
             detail="AI service is not configured on the server (missing API key).",
         )
 
     try:
-        client = genai.Client(api_key=settings.gemini_api_key)
-        response = client.models.generate_content(
-            model="gemini-2.5-flash-lite",
-            contents=user_message,
-            config={"system_instruction": SYSTEM_INSTRUCTION},
+        client = OpenAI(api_key=settings.openai_api_key)
+        response = client.chat.completions.create(
+            model="gpt-5-nano",
+            messages=[
+                {"role": "system", "content": SYSTEM_INSTRUCTION},
+                {"role": "user", "content": user_message},
+            ],
+            response_format={"type": "json_object"},
         )
-        raw_text = response.text.strip()
+        raw_text = (response.choices[0].message.content or "").strip()
+        finish_reason = response.choices[0].finish_reason
     except Exception as exc:
         logger.exception(
-            "parse_program: Gemini call failed (file=%r, ext=%s, text_chars=%d)",
+            "parse_program: OpenAI call failed (file=%r, ext=%s, text_chars=%d)",
             filename, ext, len(spreadsheet_text),
         )
         raise HTTPException(
@@ -231,12 +235,12 @@ Return a JSON object with this exact structure:
 
     if not raw_text:
         logger.error(
-            "parse_program: Gemini returned empty text (file=%r, finish_reason=%s)",
-            filename, getattr(getattr(response, "candidates", [None])[0], "finish_reason", "?"),
+            "parse_program: OpenAI returned empty text (file=%r, finish_reason=%s)",
+            filename, finish_reason,
         )
         raise HTTPException(
             status_code=502,
-            detail="AI service returned an empty response — file may be too large or unparseable",
+            detail=f"AI service returned an empty response (finish_reason={finish_reason}) — file may be too large or unparseable",
         )
 
     # Strip accidental markdown fences

@@ -6,7 +6,7 @@ from typing import Optional
 import base64
 import json
 import logging
-from google import genai
+from openai import OpenAI
 from ..database import get_db
 from ..auth import get_current_athlete
 from .. import models
@@ -1055,21 +1055,19 @@ def flag_workout(
 
                     matched_result = None
                     try:
-                        client = genai.Client(api_key=settings.gemini_api_key)
-                        response = client.models.generate_content(
-                            model="gemini-2.5-flash-lite",
-                            contents=user_message,
-                            config={"system_instruction": system_instruction},
+                        client = OpenAI(api_key=settings.openai_api_key)
+                        response = client.chat.completions.create(
+                            model="gpt-5-nano",
+                            messages=[
+                                {"role": "system", "content": system_instruction},
+                                {"role": "user", "content": user_message},
+                            ],
+                            response_format={"type": "json_object"},
                         )
-                        raw = response.text.strip()
-                        # Strip markdown fences if present
-                        if raw.startswith("```"):
-                            raw = raw.split("```")[1]
-                            if raw.startswith("json"):
-                                raw = raw[4:]
+                        raw = (response.choices[0].message.content or "").strip()
                         matched_result = json.loads(raw)
-                    except Exception as gemini_err:
-                        logger.error("Gemini matching failed: %s", gemini_err)
+                    except Exception as ai_err:
+                        logger.exception("Rehab matching call failed: %s", ai_err)
 
                     if matched_result is None:
                         db.add(models.Notification(
