@@ -91,14 +91,19 @@ def _cell_to_str(val) -> str:
     return str(val).strip()
 
 
-def _read_pdf(contents: bytes) -> str:
+def _read_pdf(contents: bytes) -> tuple[str, int, int]:
+    """Return (joined_text, page_count, non_empty_page_count)."""
     import fitz
     doc = fitz.open(stream=contents, filetype="pdf")
-    sections = []
+    sections: list[str] = []
+    non_empty_pages = 0
     for page_num, page in enumerate(doc):
+        text = page.get_text()
+        if text.strip():
+            non_empty_pages += 1
         sections.append(f"=== Page {page_num + 1} ===")
-        sections.append(page.get_text())
-    return "\n".join(sections)
+        sections.append(text)
+    return "\n".join(sections), len(doc), non_empty_pages
 
 
 def _read_xlsx(contents: bytes) -> str:
@@ -143,7 +148,26 @@ async def parse_program(
     contents = await file.read()
 
     try:
-        spreadsheet_text = _read_pdf(contents) if ext == ".pdf" else _read_xlsx(contents)
+        if ext == ".pdf":
+            spreadsheet_text, page_count, non_empty_pages = _read_pdf(contents)
+            if non_empty_pages == 0:
+                raise HTTPException(
+                    status_code=422,
+                    detail=(
+                        f"This PDF has {page_count} page(s) but no extractable text — "
+                        "it looks like a scanned image or has all text stored as graphics. "
+                        "Re-export the PDF with selectable text, or upload an .xlsx version."
+                    ),
+                )
+        else:
+            spreadsheet_text = _read_xlsx(contents)
+            if not spreadsheet_text.strip():
+                raise HTTPException(
+                    status_code=422,
+                    detail="The uploaded spreadsheet appears to be empty.",
+                )
+    except HTTPException:
+        raise
     except Exception as exc:
         raise HTTPException(status_code=422, detail=f"Could not read file: {exc}")
 
