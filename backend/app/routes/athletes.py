@@ -77,54 +77,67 @@ def complete_onboarding(
     current_athlete: models.User = Depends(get_current_athlete),
     db: Session = Depends(get_db)
 ):
-    current_athlete.sport = data.sport
-    current_athlete.team = data.team
-    current_athlete.training_goals = data.training_goals
-    current_athlete.injuries = data.injuries
-    current_athlete.experience_level = data.experience_level
-    current_athlete.onboarding_completed = True
+    try:
+        current_athlete.sport = data.sport
+        current_athlete.team = data.team
+        current_athlete.training_goals = data.training_goals
+        current_athlete.injuries = data.injuries
+        current_athlete.experience_level = data.experience_level
+        current_athlete.onboarding_completed = True
 
-    if data.maxes:
-        for exercise_name, max_weight in data.maxes.items():
-            existing = db.query(models.AthleteMax).filter(
-                and_(
-                    models.AthleteMax.athlete_id == current_athlete.id,
-                    models.AthleteMax.exercise_name == exercise_name
-                )
-            ).first()
-            if existing:
-                existing.max_weight = max_weight
-            else:
-                db.add(models.AthleteMax(
-                    athlete_id=current_athlete.id,
-                    exercise_name=exercise_name,
-                    max_weight=max_weight,
-                    unit="lbs"
-                ))
+        if data.maxes:
+            for exercise_name, max_weight in data.maxes.items():
+                existing = db.query(models.AthleteMax).filter(
+                    and_(
+                        models.AthleteMax.athlete_id == current_athlete.id,
+                        models.AthleteMax.exercise_name == exercise_name
+                    )
+                ).first()
+                if existing:
+                    existing.max_weight = max_weight
+                else:
+                    db.add(models.AthleteMax(
+                        athlete_id=current_athlete.id,
+                        exercise_name=exercise_name,
+                        max_weight=max_weight,
+                        unit="lbs"
+                    ))
 
-    # Save strength goals if provided
-    if data.goals:
-        for exercise_name, goal_data in data.goals.items():
-            target_weight = goal_data.get("target_weight")
-            target_date_str = goal_data.get("target_date")
-            if target_weight and target_date_str:
-                starting_weight = 0.0
-                if data.maxes and exercise_name in data.maxes:
-                    starting_weight = data.maxes[exercise_name]
-                db.add(models.StrengthGoal(
-                    athlete_id=current_athlete.id,
-                    goal_type="lift",
-                    exercise_name=exercise_name,
-                    starting_weight=starting_weight,
-                    target_weight=float(target_weight),
-                    target_date=datetime.fromisoformat(target_date_str)
-                ))
+        if data.goals:
+            for exercise_name, goal_data in data.goals.items():
+                target_weight = goal_data.get("target_weight")
+                target_date_str = goal_data.get("target_date")
+                if target_weight and target_date_str:
+                    starting_weight = 0.0
+                    if data.maxes and exercise_name in data.maxes:
+                        starting_weight = data.maxes[exercise_name]
+                    db.add(models.StrengthGoal(
+                        athlete_id=current_athlete.id,
+                        goal_type="lift",
+                        exercise_name=exercise_name,
+                        starting_weight=starting_weight,
+                        target_weight=float(target_weight),
+                        target_date=datetime.fromisoformat(target_date_str)
+                    ))
 
-    # For coachless athletes, generate a starter program
-    if not data.has_coach:
-        _generate_starter_program(current_athlete, data, db)
+        if not data.has_coach:
+            _generate_starter_program(current_athlete, data, db)
 
-    db.commit()
+        db.commit()
+    except HTTPException:
+        raise
+    except Exception:
+        db.rollback()
+        logger.exception(
+            "complete_onboarding failed for athlete %s (has_coach=%s, goals=%s, maxes=%s)",
+            current_athlete.id, data.has_coach,
+            list((data.goals or {}).keys()), list((data.maxes or {}).keys()),
+        )
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to complete onboarding. Check server logs for details.",
+        )
+
     return {"message": "Onboarding completed successfully"}
 
 
