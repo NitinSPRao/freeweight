@@ -1,11 +1,42 @@
 import logging
+import os
+from contextlib import asynccontextmanager
 
+from alembic import command
+from alembic.config import Config
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from .routes import auth, coaches, programs, athletes, exercises, metrics, parse_program, folders
 
 logger = logging.getLogger(__name__)
+
+
+def _run_migrations() -> None:
+    # Render's dashboard start command overrides Procfile/nixpacks, so we
+    # cannot guarantee `alembic upgrade head` runs on deploy from the shell.
+    # Running it from the app's startup hook ensures it always runs as long
+    # as uvicorn boots the app, regardless of how the container is started.
+    # alembic upgrade head is idempotent — safe to run every restart.
+    backend_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    alembic_ini = os.path.join(backend_dir, "alembic.ini")
+    logger.info("Running alembic upgrade head from %s", alembic_ini)
+    cfg = Config(alembic_ini)
+    command.upgrade(cfg, "head")
+    logger.info("Alembic migrations applied")
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    try:
+        _run_migrations()
+    except Exception:
+        # Fail loudly: if migrations fail, do not accept traffic with a
+        # mismatched schema. Re-raise so uvicorn exits and Render marks
+        # the deploy as failed.
+        logger.exception("Alembic migrations failed on startup")
+        raise
+    yield
 
 ALLOWED_ORIGINS = [
     "http://localhost:5173",
@@ -21,7 +52,7 @@ ALLOWED_ORIGINS = [
     "https://freeweight-prod.vercel.app",
 ]
 
-app = FastAPI(title="Freeweight API", version="1.0.0")
+app = FastAPI(title="Freeweight API", version="1.0.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
