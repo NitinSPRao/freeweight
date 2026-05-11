@@ -1,3 +1,4 @@
+import logging
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from typing import Optional
 import io
@@ -8,6 +9,8 @@ from google import genai
 from ..auth import get_current_coach
 from ..models import User
 from ..config import settings
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/coaches", tags=["coaches"])
 
@@ -201,7 +204,13 @@ Return a JSON object with this exact structure:
   ]
 }"""
 
-    # Call Gemini
+    if not settings.gemini_api_key:
+        logger.error("parse_program: gemini_api_key is not configured")
+        raise HTTPException(
+            status_code=500,
+            detail="AI service is not configured on the server (missing API key).",
+        )
+
     try:
         client = genai.Client(api_key=settings.gemini_api_key)
         response = client.models.generate_content(
@@ -210,10 +219,24 @@ Return a JSON object with this exact structure:
             config={"system_instruction": SYSTEM_INSTRUCTION},
         )
         raw_text = response.text.strip()
-    except Exception:
+    except Exception as exc:
+        logger.exception(
+            "parse_program: Gemini call failed (file=%r, ext=%s, text_chars=%d)",
+            filename, ext, len(spreadsheet_text),
+        )
         raise HTTPException(
-            status_code=503,
-            detail="AI service unavailable — please try again",
+            status_code=502,
+            detail=f"AI service error: {type(exc).__name__}: {exc}",
+        )
+
+    if not raw_text:
+        logger.error(
+            "parse_program: Gemini returned empty text (file=%r, finish_reason=%s)",
+            filename, getattr(getattr(response, "candidates", [None])[0], "finish_reason", "?"),
+        )
+        raise HTTPException(
+            status_code=502,
+            detail="AI service returned an empty response — file may be too large or unparseable",
         )
 
     # Strip accidental markdown fences
