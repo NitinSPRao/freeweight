@@ -34,7 +34,16 @@ interface ExerciseCell {
   reps: number;
   coach_notes: string;
   rest_seconds: string;
+  target_exercise: string;      // "" | "squat" | "bench" | "deadlift" | "clean"
+  percentage_of_max: string;    // user-entered 0-100, stored as string for input
 }
+
+const LIFT_OPTIONS: { value: string; label: string }[] = [
+  { value: "squat", label: "Squat" },
+  { value: "bench", label: "Bench" },
+  { value: "deadlift", label: "Deadlift" },
+  { value: "clean", label: "Clean" },
+];
 
 interface SectionCell {
   kind: "section";
@@ -46,7 +55,18 @@ interface SectionCell {
 type Cell = ExerciseCell | SectionCell;
 
 type CellUpdate =
-  | Partial<Pick<ExerciseCell, "name" | "sets" | "reps" | "coach_notes" | "rest_seconds">>
+  | Partial<
+      Pick<
+        ExerciseCell,
+        | "name"
+        | "sets"
+        | "reps"
+        | "coach_notes"
+        | "rest_seconds"
+        | "target_exercise"
+        | "percentage_of_max"
+      >
+    >
   | Partial<Pick<SectionCell, "name" | "level">>;
 
 interface DayDraft {
@@ -86,6 +106,11 @@ function exercisesToCells(exercises: Exercise[]): Cell[] {
       reps: ex.reps,
       coach_notes: ex.coach_notes ?? "",
       rest_seconds: ex.rest_seconds != null ? String(ex.rest_seconds) : "",
+      target_exercise: ex.target_exercise ?? "",
+      percentage_of_max:
+        ex.percentage_of_max != null
+          ? String(Math.round(ex.percentage_of_max * 100))
+          : "",
     });
   }
   return cells;
@@ -233,70 +258,124 @@ function SortableCell({ cell, isEmpty, onUpdate, onRemove, onChangeLevel }: Sort
     );
   }
 
+  const hasPctFields = cell.target_exercise !== "" || cell.percentage_of_max !== "";
+  const [showPctRow, setShowPctRow] = useState(hasPctFields);
+
   return (
     <div
       ref={setNodeRef}
       style={style}
-      className="flex items-center gap-2 py-1.5 px-2 rounded hover:bg-secondary/5 group mb-0.5"
+      className="py-1.5 px-2 rounded hover:bg-secondary/5 group mb-0.5"
     >
-      <button
-        {...attributes}
-        {...listeners}
-        className="cursor-grab text-secondary/30 hover:text-secondary/60 flex-shrink-0 touch-none select-none"
-        tabIndex={-1}
-        aria-label="drag exercise"
-      >
-        ⠿
-      </button>
-      <input
-        type="text"
-        value={cell.name}
-        onChange={(e) => onUpdate({ name: e.target.value })}
-        className="input-field py-1 text-sm flex-1 min-w-[120px]"
-        placeholder="Exercise name"
-      />
-      <input
-        type="number"
-        min={1}
-        value={cell.sets}
-        onChange={(e) => onUpdate({ sets: parseInt(e.target.value) || 1 })}
-        className="input-field py-1 text-sm w-14 text-center"
-        title="Sets"
-        placeholder="Sets"
-      />
-      <input
-        type="number"
-        min={1}
-        value={cell.reps}
-        onChange={(e) => onUpdate({ reps: parseInt(e.target.value) || 1 })}
-        className="input-field py-1 text-sm w-14 text-center"
-        title="Reps"
-        placeholder="Reps"
-      />
-      <input
-        type="number"
-        min={0}
-        value={cell.rest_seconds}
-        onChange={(e) => onUpdate({ rest_seconds: e.target.value })}
-        className="input-field py-1 text-sm w-16 text-center"
-        placeholder="Rest s"
-        title="Rest (seconds)"
-      />
-      <input
-        type="text"
-        value={cell.coach_notes}
-        onChange={(e) => onUpdate({ coach_notes: e.target.value })}
-        className="input-field py-1 text-sm flex-1 min-w-[80px]"
-        placeholder="Notes / load"
-        title="Coach notes"
-      />
-      <button
-        onClick={onRemove}
-        className="text-secondary/40 hover:text-error flex-shrink-0 px-1 transition-colors"
-        title="Remove exercise"
-      >
-        ✕
-      </button>
+      <div className="flex items-center gap-2">
+        <button
+          {...attributes}
+          {...listeners}
+          className="cursor-grab text-secondary/30 hover:text-secondary/60 flex-shrink-0 touch-none select-none"
+          tabIndex={-1}
+          aria-label="drag exercise"
+        >
+          ⠿
+        </button>
+        <input
+          type="text"
+          value={cell.name}
+          onChange={(e) => onUpdate({ name: e.target.value })}
+          className="input-field py-1 text-sm flex-1 min-w-[120px]"
+          placeholder="Exercise name"
+        />
+        <input
+          type="number"
+          min={1}
+          value={cell.sets}
+          onChange={(e) => onUpdate({ sets: parseInt(e.target.value) || 1 })}
+          className="input-field py-1 text-sm w-14 text-center"
+          title="Sets"
+          placeholder="Sets"
+        />
+        <input
+          type="number"
+          min={1}
+          value={cell.reps}
+          onChange={(e) => onUpdate({ reps: parseInt(e.target.value) || 1 })}
+          className="input-field py-1 text-sm w-14 text-center"
+          title="Reps"
+          placeholder="Reps"
+        />
+        <input
+          type="number"
+          min={0}
+          value={cell.rest_seconds}
+          onChange={(e) => onUpdate({ rest_seconds: e.target.value })}
+          className="input-field py-1 text-sm w-16 text-center"
+          placeholder="Rest s"
+          title="Rest (seconds)"
+        />
+        <input
+          type="text"
+          value={cell.coach_notes}
+          onChange={(e) => onUpdate({ coach_notes: e.target.value })}
+          className="input-field py-1 text-sm flex-1 min-w-[80px]"
+          placeholder="Notes / load"
+          title="Coach notes"
+        />
+        <button
+          onClick={onRemove}
+          className="text-secondary/40 hover:text-error flex-shrink-0 px-1 transition-colors"
+          title="Remove exercise"
+        >
+          ✕
+        </button>
+      </div>
+      {showPctRow ? (
+        <div className="flex items-center gap-2 mt-1 pl-6">
+          <label className="text-xs text-secondary">Lift</label>
+          <select
+            value={cell.target_exercise}
+            onChange={(e) => onUpdate({ target_exercise: e.target.value })}
+            className="input-field py-1 text-sm w-28"
+            title="Target lift for % of max"
+          >
+            <option value="">—</option>
+            {LIFT_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label}
+              </option>
+            ))}
+          </select>
+          <label className="text-xs text-secondary">% of Max</label>
+          <input
+            type="number"
+            min={0}
+            max={100}
+            value={cell.percentage_of_max}
+            onChange={(e) => onUpdate({ percentage_of_max: e.target.value })}
+            className="input-field py-1 text-sm w-20 text-center"
+            placeholder="0-100"
+          />
+          <span className="text-xs text-secondary/60">%</span>
+          <button
+            onClick={() => {
+              onUpdate({ target_exercise: "", percentage_of_max: "" });
+              setShowPctRow(false);
+            }}
+            className="text-secondary/40 hover:text-error flex-shrink-0 px-1 text-xs transition-colors"
+            title="Hide % of max"
+          >
+            ✕
+          </button>
+        </div>
+      ) : (
+        <div className="pl-6 mt-0.5">
+          <button
+            type="button"
+            onClick={() => setShowPctRow(true)}
+            className="text-xs text-secondary/50 hover:text-primary transition-colors"
+          >
+            + % of max
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -633,7 +712,7 @@ function CreateProgramContent() {
   ) => {
     const newCell: Cell =
       kind === "exercise"
-        ? { kind: "exercise", id: uid(), name: "", sets: 3, reps: 10, coach_notes: "", rest_seconds: "" }
+        ? { kind: "exercise", id: uid(), name: "", sets: 3, reps: 10, coach_notes: "", rest_seconds: "", target_exercise: "", percentage_of_max: "" }
         : { kind: "section", id: uid(), name: "", level: 1 };
     setWeeks((prev) => {
       const next = prev.map((w) => w.map((d) => ({ ...d, cells: [...d.cells] })));
@@ -705,6 +784,8 @@ function CreateProgramContent() {
           coach_notes: string | null;
           group_label: string | null;
           rest_seconds: number | null;
+          target_exercise: string | null;
+          percentage_of_max: number | null;
           order: number;
         }[] = [];
         let currentGroupLabel: string | null = null;
@@ -713,6 +794,9 @@ function CreateProgramContent() {
           if (cell.kind === "section") {
             currentGroupLabel = cell.name.trim() || null;
           } else if (cell.kind === "exercise" && cell.name.trim()) {
+            const pctRaw = parseFloat(cell.percentage_of_max);
+            const pctDecimal =
+              Number.isFinite(pctRaw) && pctRaw > 0 ? pctRaw / 100 : null;
             exercises.push({
               name: cell.name.trim(),
               sets: cell.sets,
@@ -720,6 +804,8 @@ function CreateProgramContent() {
               coach_notes: cell.coach_notes || null,
               group_label: currentGroupLabel,
               rest_seconds: cell.rest_seconds ? parseInt(cell.rest_seconds) : null,
+              target_exercise: cell.target_exercise || null,
+              percentage_of_max: pctDecimal,
               order: exercises.length,
             });
           }

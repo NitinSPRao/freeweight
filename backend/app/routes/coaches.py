@@ -7,7 +7,7 @@ import json
 import logging
 from ..database import get_db
 from ..auth import get_current_coach
-from ..models import User, Group, Subgroup, WorkoutLog, AthleteMax, Workout, ProgramAssignment, group_members, Program, Exercise, Notification
+from ..models import User, Group, Subgroup, WorkoutLog, SetLog, AthleteMax, Workout, ProgramAssignment, group_members, Program, Exercise, Notification
 from ..schemas.coach import (
     DashboardResponse,
     RosterResponse,
@@ -436,6 +436,68 @@ def get_athlete_detail(
             for m in maxes
         ],
         "recent_workouts": log_data,
+    }
+
+
+@router.get("/athletes/{athlete_id}/workouts/{workout_log_id}/summary")
+def get_athlete_workout_summary(
+    athlete_id: int,
+    workout_log_id: int,
+    current_coach: User = Depends(get_current_coach),
+    db: Session = Depends(get_db),
+):
+    athlete = db.query(User).filter(User.id == athlete_id).first()
+    if not athlete or athlete not in current_coach.coached_athletes:
+        raise HTTPException(status_code=404, detail="Athlete not found in your roster")
+
+    log = db.query(WorkoutLog).filter(
+        WorkoutLog.id == workout_log_id,
+        WorkoutLog.athlete_id == athlete_id,
+    ).first()
+    if not log:
+        raise HTTPException(status_code=404, detail="Workout log not found")
+
+    workout = db.query(Workout).filter(Workout.id == log.workout_id).first()
+    if not workout:
+        raise HTTPException(status_code=404, detail="Workout not found")
+
+    set_logs = db.query(SetLog).filter(SetLog.workout_log_id == log.id).all()
+    sets_by_exercise: dict[int, list[SetLog]] = {}
+    for sl in set_logs:
+        sets_by_exercise.setdefault(sl.exercise_id, []).append(sl)
+
+    exercises_payload = []
+    for exercise in sorted(workout.exercises, key=lambda e: e.order):
+        logs = sorted(
+            sets_by_exercise.get(exercise.id, []),
+            key=lambda s: s.set_number,
+        )
+        exercises_payload.append({
+            "id": exercise.id,
+            "name": exercise.name,
+            "group_label": exercise.group_label,
+            "sets": exercise.sets,
+            "reps": exercise.reps,
+            "set_logs": [
+                {
+                    "set_number": s.set_number,
+                    "weight_used": s.weight_used,
+                    "reps_completed": s.reps_completed,
+                    "was_modified": s.was_modified or False,
+                }
+                for s in logs
+            ],
+        })
+
+    return {
+        "workout_log_id": log.id,
+        "workout_name": workout.name,
+        "completed_at": log.completed_at.isoformat() if log.completed_at else None,
+        "notes": log.notes,
+        "is_flagged": log.is_flagged or False,
+        "flag_reason": log.flag_reason,
+        "coach_response": log.coach_response,
+        "exercises": exercises_payload,
     }
 
 

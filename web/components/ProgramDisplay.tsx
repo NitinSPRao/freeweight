@@ -12,6 +12,8 @@ export interface DisplayExercise {
   rest_seconds?: number | null;
   coach_notes?: string | null;
   group_label?: string | null;
+  target_exercise?: string | null;
+  percentage_of_max?: number | null;
   order: number;
 }
 
@@ -33,12 +35,16 @@ export interface DisplayProgram {
 // ─── Conversion helpers ──────────────────────────────────────────────────────
 
 export function programToDisplay(program: Program): DisplayProgram {
-  // Deduplicate workouts: the API returns both template workouts (athlete_id=null)
-  // and athlete-specific copies that share the same (week_number, day_label).
-  // Keep the one with the highest id (most recently created) per unique slot.
+  // Deduplicate workouts to fix duplicate day display:
+  // - same_every_week=true → dedup by day_label only (a single week is repeated)
+  // - same_every_week=false → dedup by (week_number, day_label)
+  // Always keep the one with the highest id (most recently created) per key.
+  const sameEveryWeek = program.same_every_week === true;
   const deduped = new Map<string, Program["workouts"][0]>();
   for (const w of program.workouts) {
-    const key = `${w.week_number ?? ""}|${w.day_label ?? ""}|${w.day_offset ?? ""}`;
+    const key = sameEveryWeek
+      ? `${w.day_label ?? ""}`
+      : `${w.week_number ?? ""}|${w.day_label ?? ""}`;
     const existing = deduped.get(key);
     if (!existing || w.id > existing.id) {
       deduped.set(key, w);
@@ -64,6 +70,8 @@ export function programToDisplay(program: Program): DisplayProgram {
           rest_seconds: e.rest_seconds,
           coach_notes: e.coach_notes,
           group_label: e.group_label,
+          target_exercise: e.target_exercise ?? null,
+          percentage_of_max: e.percentage_of_max ?? null,
           order: e.order,
         })),
     })),
@@ -233,22 +241,37 @@ function DayCard({ workout }: { workout: DisplayWorkout }) {
                 </div>
               )}
               <div className={section.label !== null ? "pl-4" : ""}>
-                {section.exercises.map((ex, ei) => (
-                  <div key={ei} className="py-2 px-1 border-b border-secondary/8 last:border-0">
-                    <div className="flex items-baseline flex-wrap gap-x-2 gap-y-0.5">
-                      <span className="font-semibold text-text text-sm">{ex.name}</span>
-                      <span className="text-xs text-secondary">
-                        {ex.sets} × {ex.reps}
-                      </span>
-                      {ex.rest_seconds ? (
-                        <span className="text-xs text-secondary">{ex.rest_seconds}s rest</span>
+                {section.exercises.map((ex, ei) => {
+                  const pct =
+                    ex.percentage_of_max != null && ex.target_exercise
+                      ? Math.round(ex.percentage_of_max * 100)
+                      : null;
+                  const liftLabel = ex.target_exercise
+                    ? ex.target_exercise.charAt(0).toUpperCase() +
+                      ex.target_exercise.slice(1).toLowerCase()
+                    : null;
+                  return (
+                    <div key={ei} className="py-2 px-1 border-b border-secondary/8 last:border-0">
+                      <div className="flex items-baseline flex-wrap gap-x-2 gap-y-0.5">
+                        <span className="font-semibold text-text text-sm">{ex.name}</span>
+                        <span className="text-xs text-secondary">
+                          {ex.sets} × {ex.reps}
+                        </span>
+                        {ex.rest_seconds ? (
+                          <span className="text-xs text-secondary">{ex.rest_seconds}s rest</span>
+                        ) : null}
+                      </div>
+                      {pct !== null && liftLabel && (
+                        <span className="inline-block mt-1 px-2 py-0.5 rounded-full bg-primary/10 text-primary/80 text-[10px] font-medium">
+                          {pct}% of {liftLabel} max
+                        </span>
+                      )}
+                      {ex.coach_notes ? (
+                        <p className="text-xs text-secondary/60 mt-0.5 italic">{ex.coach_notes}</p>
                       ) : null}
                     </div>
-                    {ex.coach_notes ? (
-                      <p className="text-xs text-secondary/60 mt-0.5 italic">{ex.coach_notes}</p>
-                    ) : null}
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           ))}

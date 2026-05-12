@@ -3,6 +3,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useParams, useRouter } from "next/navigation";
 import { useState } from "react";
+import Link from "next/link";
 import AuthGuard from "@/components/AuthGuard";
 import NavBar from "@/components/NavBar";
 import { coachApi } from "@/lib/api-endpoints";
@@ -235,6 +236,14 @@ export default function CoachAthleteDetailPage() {
                         )}
                         {workout.is_flagged && (
                           <span className="text-error text-sm font-medium">Flagged</span>
+                        )}
+                        {workout.is_completed && (
+                          <Link
+                            href={`/coach/athletes/${athleteId}/workouts/${workout.id}`}
+                            className="text-primary text-sm hover:underline"
+                          >
+                            View Summary →
+                          </Link>
                         )}
                       </div>
                     </div>

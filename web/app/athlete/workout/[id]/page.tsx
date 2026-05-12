@@ -3,6 +3,7 @@
 import { useState, useCallback, useEffect, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useRouter, useParams } from "next/navigation";
+import Link from "next/link";
 import AuthGuard from "@/components/AuthGuard";
 import NavBar from "@/components/NavBar";
 import { athleteApi, Exercise, FlagResult } from "@/lib/api-endpoints";
@@ -158,22 +159,43 @@ export default function WorkoutPage() {
     },
   });
 
-  // ── Target weight helper ──────────────────────────────────────────────────
+  // ── Target weight helpers ─────────────────────────────────────────────────
+  // Prefer server-calculated target_weight on the exercise; fall back to
+  // client-side calc against the athlete's progress maxes.
   const getTargetWeight = useCallback(
     (exercise: Exercise | undefined) => {
-      if (!exercise?.percentage_of_max || !exercise?.target_exercise || !maxes) return null;
+      if (!exercise) return null;
+      if (exercise.target_weight != null) return exercise.target_weight;
+      if (!exercise.percentage_of_max || !exercise.target_exercise || !maxes) return null;
       const maxArr = Array.isArray(maxes) ? maxes : [];
       const max = maxArr.find(
         (m: any) =>
           (m.exercise_name || "").toLowerCase() === exercise.target_exercise?.toLowerCase()
       );
       if (!max) return null;
-      return calculateTargetWeight(
-        (max as any).max_weight || (max as any).data?.[0]?.max_weight || 0,
-        exercise.percentage_of_max
-      );
+      const maxWeight =
+        (max as any).current_max ||
+        (max as any).max_weight ||
+        (max as any).data?.[0]?.max_weight ||
+        0;
+      if (!maxWeight) return null;
+      return calculateTargetWeight(maxWeight, exercise.percentage_of_max);
     },
     [maxes]
+  );
+
+  // Pretty lift label (e.g. "Squat") from stored target_exercise key.
+  const liftLabel = (key?: string | null) =>
+    key ? key.charAt(0).toUpperCase() + key.slice(1).toLowerCase() : "";
+
+  // "80% of Squat max" — null if not a %-of-max exercise.
+  const getTargetSubtext = useCallback(
+    (exercise: Exercise | undefined) => {
+      if (!exercise?.percentage_of_max || !exercise?.target_exercise) return null;
+      const pct = Math.round(exercise.percentage_of_max * 100);
+      return `${pct}% of ${liftLabel(exercise.target_exercise)} max`;
+    },
+    []
   );
 
   // ── Queue initialization ──────────────────────────────────────────────────
@@ -297,6 +319,11 @@ export default function WorkoutPage() {
     ? exercises.find((e) => e.id === activeItem.exerciseId)
     : undefined;
   const activeTargetWeight = getTargetWeight(activeExercise);
+  const activeTargetSubtext = getTargetSubtext(activeExercise);
+  const activeMissingMax =
+    activeExercise?.target_exercise &&
+    activeExercise?.percentage_of_max != null &&
+    activeTargetWeight === null;
   const activeColor = activeItem
     ? EXERCISE_COLORS[activeItem.colorIndex % EXERCISE_COLORS.length]
     : null;
@@ -445,11 +472,28 @@ export default function WorkoutPage() {
                   </span>
                 </div>
 
-                <p className="text-text text-lg font-semibold mb-5">
+                <p className="text-text text-lg font-semibold mb-1">
                   {activeTargetWeight !== null
-                    ? `${activeTargetWeight} lbs × ${activeItem.reps} reps`
+                    ? `Target: ${activeTargetWeight} lbs × ${activeItem.reps} reps`
                     : `${activeItem.reps} reps`}
                 </p>
+                {activeTargetWeight !== null && activeTargetSubtext && (
+                  <p className="text-secondary text-xs mb-5">{activeTargetSubtext}</p>
+                )}
+                {activeMissingMax && (
+                  <p className="text-secondary text-xs mb-5">
+                    <Link
+                      href="/athlete/profile"
+                      className="text-primary hover:underline"
+                    >
+                      Add your {liftLabel(activeExercise?.target_exercise)} max
+                    </Link>{" "}
+                    to see target weight
+                  </p>
+                )}
+                {activeTargetWeight === null && !activeMissingMax && (
+                  <div className="mb-5" />
+                )}
 
                 {/* Action buttons */}
                 {!showCustomInput ? (
@@ -640,8 +684,8 @@ export default function WorkoutPage() {
                         sets: e.sets,
                         reps: e.reps,
                         group_label: e.group_label ?? null,
-                        percentage_of_max: e.percentage_of_max,
-                        target_exercise: e.target_exercise,
+                        percentage_of_max: e.percentage_of_max ?? undefined,
+                        target_exercise: e.target_exercise ?? undefined,
                       })),
                       loggedSets,
                       completionNotes,

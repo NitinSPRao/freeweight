@@ -55,8 +55,9 @@ export interface Exercise {
   name: string;
   sets: number;
   reps: number;
-  percentage_of_max?: number;
-  target_exercise?: string;
+  percentage_of_max?: number | null;
+  target_exercise?: string | null;
+  target_weight?: number | null;
   video_url?: string;
   coach_notes?: string;
   rest_seconds?: number;
@@ -229,6 +230,33 @@ export interface AthleteStatus {
   last_workout_date?: string;
   workouts_this_week: number;
   has_flagged: boolean;
+}
+
+export interface CoachWorkoutSummarySet {
+  set_number: number;
+  weight_used: number;
+  reps_completed: number;
+  was_modified: boolean;
+}
+
+export interface CoachWorkoutSummaryExercise {
+  id: number;
+  name: string;
+  group_label: string | null;
+  sets: number;
+  reps: number;
+  set_logs: CoachWorkoutSummarySet[];
+}
+
+export interface CoachWorkoutSummary {
+  workout_log_id: number;
+  workout_name: string;
+  completed_at: string | null;
+  notes: string | null;
+  is_flagged: boolean;
+  flag_reason: string | null;
+  coach_response: string | null;
+  exercises: CoachWorkoutSummaryExercise[];
 }
 
 // ============================================================================
@@ -409,6 +437,13 @@ export const coachApi = {
 
   getAthleteDetail: async (athleteId: number) => {
     const response = await apiClient.get<AthleteProfile>(`/api/coaches/athletes/${athleteId}`);
+    return response.data;
+  },
+
+  getWorkoutSummary: async (athleteId: number, workoutLogId: number) => {
+    const response = await apiClient.get<CoachWorkoutSummary>(
+      `/api/coaches/athletes/${athleteId}/workouts/${workoutLogId}/summary`
+    );
     return response.data;
   },
 
